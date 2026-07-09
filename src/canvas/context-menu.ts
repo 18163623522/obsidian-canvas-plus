@@ -11,7 +11,6 @@ import { setShape, setSticky, togglePlain, setEdgeStyle, setEdgeWeight } from ".
 import { expandOneDegree, expandTwoDegrees } from "./graph-expand";
 import { createIframeNode } from "./iframe-node";
 import { toggleLock, toggleHide, bringToFront, sendToBack } from "./layers";
-import { setPenMode, getPenMode, clearStrokes } from "./pen-layer";
 
 /** Lucide SVG 图标（Obsidian 内置风格） */
 const ICONS: Record<string, string> = {
@@ -159,15 +158,6 @@ function appendBlankItems(menuEl: HTMLElement, canvas: any, c: { x: number; y: n
     { label: "流程图", onClick: async () => { closeMenu(); const m = await import("./layout"); m.applyLayout(canvas, Array.from(canvas.nodes.values()), canvas.getData().edges, { type: "dag" }); } },
   ]);
   menuEl.appendChild(layoutItem);
-
-  // 画笔工具
-  const penItem = createItem("画笔工具", "layout", () => {}, true);
-  const penSub = createSubmenu(penItem, [
-    { label: getPenMode() === "pen" ? "✓ 画线模式" : "画线模式", onClick: () => { setPenMode(getPenMode() === "pen" ? "none" : "pen"); closeMenu(); } },
-    { label: getPenMode() === "arrow" ? "✓ 画箭头模式" : "画箭头模式", onClick: () => { setPenMode(getPenMode() === "arrow" ? "none" : "arrow"); closeMenu(); } },
-    { label: "清除所有标注", onClick: () => { clearStrokes(canvas); closeMenu(); } },
-  ]);
-  menuEl.appendChild(penItem);
 }
 
 /** 节点右键：样式 + 展开链接 */

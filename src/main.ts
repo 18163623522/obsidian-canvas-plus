@@ -30,8 +30,6 @@ import { createStickyNode } from "./canvas/node-styles";
 import { expandMindmap, mindmapFromNote } from "./canvas/mindmap";
 import { expandOneDegree, expandTwoDegrees } from "./canvas/graph-expand";
 import { createIframeNode, setupIframeNodes } from "./canvas/iframe-node";
-import { setupPenLayer, setPenMode, clearStrokes, getPenMode } from "./canvas/pen-layer";
-import type { PenMode } from "./canvas/pen-layer";
 import { toggleLock, toggleHide, bringToFront, sendToBack, applyLayerStyle } from "./canvas/layers";
 import { setupTablePaste } from "./canvas/table-paste";
 import {
@@ -79,7 +77,6 @@ export default class CanvasPlusPlugin extends Plugin {
   private uninstallTimers?: () => void;
   private uninstallContextMenu?: () => void;
   private uninstallIframe?: () => void;
-  private uninstallPen?: () => void;
   private textFormatToolbar!: TextFormatToolbar;
 
   async onload() {
@@ -156,8 +153,6 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallContextMenu = setupContextMenu(this);
     // 11. 网页 iframe 嵌入伪节点
     this.uninstallIframe = setupIframeNodes(this);
-    // 12. 自由画笔标注层
-    this.uninstallPen = setupPenLayer(this);
 
     // ——————————————————————————————————————————————
     //  纯文字节点命令
@@ -531,7 +526,6 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallTimers?.();
     this.uninstallContextMenu?.();
     this.uninstallIframe?.();
-    this.uninstallPen?.();
     this.toolbar?.destroy();
   }
 
