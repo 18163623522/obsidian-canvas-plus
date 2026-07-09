@@ -10,6 +10,7 @@
 import type { App, Plugin } from "obsidian";
 import type { Canvas, CanvasNode } from "../types/canvas-internal";
 import { applyLayerStyle } from "./layers";
+import { applyIcon } from "./node-icon";
 
 // ============== 标记字段定义 ==============
 export const FLAG_STYLE = "cpStyle"; // "plain" 纯文字
@@ -139,6 +140,9 @@ export function applyNodeStyle(node: CanvasNode): void {
 
   // 图层样式（锁定/隐藏）
   applyLayerStyle(node);
+
+  // 图标标记
+  applyIcon(node);
 }
 
 // ============== 便捷 setter ==============

@@ -11,6 +11,9 @@ import { setShape, setSticky, togglePlain, setEdgeStyle, setEdgeWeight } from ".
 import { expandOneDegree, expandTwoDegrees } from "./graph-expand";
 import { createIframeNode } from "./iframe-node";
 import { toggleLock, toggleHide, bringToFront, sendToBack } from "./layers";
+import { setEdgeLabel, setEdgeColor, setEdgeArrow, getEdgeArrowMode } from "./edge-enhance";
+import { groupSelection, toggleCollapseGroup } from "./group-collapse";
+import { setNodeIcon, getIconList } from "./node-icon";
 
 /** Lucide SVG 图标（Obsidian 内置风格） */
 const ICONS: Record<string, string> = {
@@ -160,8 +163,19 @@ function appendBlankItems(menuEl: HTMLElement, canvas: any, c: { x: number; y: n
   menuEl.appendChild(layoutItem);
 }
 
-/** 节点右键：样式 + 展开链接 */
+/** 节点右键：样式 + 展开链接 + 分组 */
 function appendNodeItems(menuEl: HTMLElement, nodes: any[], closeMenu: () => void, canvas: any, plugin: Plugin) {
+  // 多选时显示"打包分组"
+  if (nodes.length >= 2) {
+    const groupItem = createItem("打包分组", "layout", () => { groupSelection(canvas); closeMenu(); });
+    menuEl.appendChild(groupItem);
+  }
+
+  // 单选 group 节点时显示"折叠/展开"
+  if (nodes.length === 1 && nodes[0].getData?.()?.type === "group") {
+    const collapseItem = createItem("折叠/展开分组", "layout", () => { toggleCollapseGroup(canvas, nodes[0]); closeMenu(); });
+    menuEl.appendChild(collapseItem);
+  }
   // 展开链接（仅单选时）
   if (nodes.length === 1) {
     const expandItem = createItem("展开链接", "layout", () => {}, true);
@@ -183,6 +197,16 @@ function appendNodeItems(menuEl: HTMLElement, nodes: any[], closeMenu: () => voi
   ]);
   menuEl.appendChild(styleItem);
 
+  // 图标标记
+  const iconItem = createItem("图标标记", "palette", () => {}, true);
+  const iconItems = getIconList().map(icon => ({
+    label: icon,
+    onClick: () => { nodes.forEach((n) => setNodeIcon(n, icon)); closeMenu(); },
+  }));
+  iconItems.push({ label: "清除图标", onClick: () => { nodes.forEach((n) => setNodeIcon(n, undefined)); closeMenu(); } });
+  createSubmenu(iconItem, iconItems);
+  menuEl.appendChild(iconItem);
+
   // 图层管理（仅单选时）
   if (nodes.length === 1) {
     const layerItem = createItem("图层管理", "layout", () => {}, true);
@@ -198,6 +222,7 @@ function appendNodeItems(menuEl: HTMLElement, nodes: any[], closeMenu: () => voi
 
 /** 连线右键：线型/粗细 */
 function appendEdgeItems(menuEl: HTMLElement, edge: any, closeMenu: () => void) {
+  // 连线样式（线型/粗细）
   const lineItem = createItem("连线样式", "spline", () => {}, true);
   const sub = createSubmenu(lineItem, [
     { label: "实线", onClick: () => { setEdgeStyle(edge, "solid"); closeMenu(); } },
@@ -208,6 +233,38 @@ function appendEdgeItems(menuEl: HTMLElement, edge: any, closeMenu: () => void) 
     { label: "粗", onClick: () => { setEdgeWeight(edge, 3); closeMenu(); } },
   ]);
   menuEl.appendChild(lineItem);
+
+  // 箭头方向
+  const curMode = getEdgeArrowMode(edge);
+  const arrowItem = createItem("箭头方向", "spline", () => {}, true);
+  const arrowSub = createSubmenu(arrowItem, [
+    { label: curMode === "forward" ? "✓ 终点箭头" : "终点箭头", onClick: () => { setEdgeArrow(edge, "forward"); closeMenu(); } },
+    { label: curMode === "backward" ? "✓ 起点箭头" : "起点箭头", onClick: () => { setEdgeArrow(edge, "backward"); closeMenu(); } },
+    { label: curMode === "both" ? "✓ 双向箭头" : "双向箭头", onClick: () => { setEdgeArrow(edge, "both"); closeMenu(); } },
+    { label: curMode === "none" ? "✓ 无箭头" : "无箭头", onClick: () => { setEdgeArrow(edge, "none"); closeMenu(); } },
+  ]);
+  menuEl.appendChild(arrowItem);
+
+  // 颜色
+  const colorItem = createItem("连线颜色", "palette", () => {}, true);
+  const colorSub = createSubmenu(colorItem, [
+    { label: "🔴 红", onClick: () => { setEdgeColor(edge, "1"); closeMenu(); } },
+    { label: "🟠 橙", onClick: () => { setEdgeColor(edge, "2"); closeMenu(); } },
+    { label: "🟢 绿", onClick: () => { setEdgeColor(edge, "4"); closeMenu(); } },
+    { label: "🔵 青", onClick: () => { setEdgeColor(edge, "5"); closeMenu(); } },
+    { label: "🟣 紫", onClick: () => { setEdgeColor(edge, "6"); closeMenu(); } },
+    { label: "默认色", onClick: () => { setEdgeColor(edge, ""); closeMenu(); } },
+  ]);
+  menuEl.appendChild(colorItem);
+
+  // 标签
+  const labelItem = createItem("编辑标签", "spline", () => {
+    const cur = edge.getData()?.label ?? "";
+    const text = window.prompt("连线标签", cur);
+    if (text !== null) setEdgeLabel(edge, text);
+    closeMenu();
+  });
+  menuEl.appendChild(labelItem);
 }
 
 /**

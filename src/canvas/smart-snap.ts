@@ -73,9 +73,8 @@ function attachDragHandlers(nodeEl: HTMLElement, node: any, canvas: any) {
 
   const onMove = (e: PointerEvent) => {
     if (!dragging) return;
-    // 只画辅助线，不修改位置（避免与原生拖拽冲突导致抖动）
     const snap = computeSnap(node, canvas);
-    drawGuides(canvas, snap.guides);
+    drawGuides(canvas, snap.guides, node);
   };
 
   const onUp = () => {
@@ -174,7 +173,7 @@ function computeSnap(activeNode: any, canvas: any): SnapResult {
 }
 
 /** 把画布坐标的辅助线画到 SVG 层（转换屏幕坐标） */
-function drawGuides(canvas: any, guides: Guide[]) {
+function drawGuides(canvas: any, guides: Guide[], activeNode?: any) {
   const svg = ensureGuideLayer(canvas);
   if (!svg) return;
   svg.innerHTML = "";
@@ -192,6 +191,33 @@ function drawGuides(canvas: any, guides: Guide[]) {
     line.setAttribute("stroke-width", "1.5");
     line.setAttribute("stroke-dasharray", "4 3");
     svg.appendChild(line);
+
+    // 间距数值标签
+    if (activeNode) {
+      const node = activeNode.getData();
+      const isVertical = g.x1 === g.x2; // 垂直线
+      // 计算间距：活动节点边到辅助线的距离
+      let dist = 0;
+      if (isVertical) {
+        dist = Math.abs(node.x - g.x1);
+        if (dist < 1) dist = Math.abs(node.x + node.width - g.x1);
+      } else {
+        dist = Math.abs(node.y - g.y1);
+        if (dist < 1) dist = Math.abs(node.y + node.height - g.y1);
+      }
+      if (dist > 0 && dist < 500) {
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        const midX = (g.x1 + g.x2) / 2 * zoom + tx;
+        const midY = (g.y1 + g.y2) / 2 * zoom + ty;
+        label.setAttribute("x", String(midX + 4));
+        label.setAttribute("y", String(midY - 4));
+        label.setAttribute("fill", g.color);
+        label.setAttribute("font-size", "11");
+        label.setAttribute("font-family", "sans-serif");
+        label.textContent = `${Math.round(dist)}`;
+        svg.appendChild(label);
+      }
+    }
   }
 }
 
