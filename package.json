@@ -1,0 +1,32 @@
+{
+  "name": "obsidian-canvas-plus",
+  "version": "0.1.0",
+  "description": "增强 Obsidian 白板：自动布局、Markdown↔Canvas 互转、批量节点操作。",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "canvas",
+    "layout"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@dagrejs/dagre": "^1.1.4",
+    "d3-hierarchy": "^3.1.2",
+    "monkey-around": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/d3-hierarchy": "^3.1.7",
+    "@types/node": "^20.14.10",
+    "esbuild": "^0.23.0",
+    "obsidian": "latest",
+    "typescript": "^5.5.4"
+  },
+  "allowScripts": {
+    "esbuild@0.23.1": true
+  }
+}

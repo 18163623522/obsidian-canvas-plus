@@ -1,0 +1,315 @@
+/* Canvas Plus 样式表 */
+
+/* ============================================================
+ * 阶段 1B：每块字号（CM6 LineDecoration + Reading view 内联样式）
+ * 标记 <!--cp:size:NNN--> 所在块套对应字号
+ * ============================================================ */
+
+/* Live Preview: 字号档位 */
+.cm-line.cp-size.cp-size-90  { font-size: 90%; }
+.cm-line.cp-size.cp-size-100 { font-size: 100%; }
+.cm-line.cp-size.cp-size-110 { font-size: 110%; }
+.cm-line.cp-size.cp-size-125 { font-size: 125%; }
+.cm-line.cp-size.cp-size-150 { font-size: 150%; }
+.cm-line.cp-size.cp-size-200 { font-size: 200%; }
+
+/* ============================================================
+ * 阶段 1B：斜杠菜单
+ * ============================================================ */
+.cp-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.cp-slash-item:hover,
+.cp-slash-item.is-active {
+  background: var(--background-modifier-hover);
+}
+.cp-slash-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--background-modifier-border);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.cp-slash-label {
+  flex: 1;
+  font-size: 14px;
+}
+.cp-slash-group {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--background-modifier-border);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* ============================================================
+ * 浮动工具条（白板选中节点时弹出）
+ * ============================================================ */
+.cp-floating-toolbar {
+  position: fixed;
+  z-index: var(--layer-menu, 100);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+}
+.cp-tb-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.cp-tb-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--background-modifier-border);
+  margin: 0 2px;
+}
+.cp-tb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 13px;
+}
+.cp-tb-btn:hover {
+  background: var(--background-modifier-hover);
+}
+.cp-color-btn {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--background-modifier-border);
+}
+.cp-delete-btn:hover {
+  background: rgba(220, 50, 50, 0.15);
+  color: #d63031;
+}
+
+/* ============================================================
+ * 白板内 slash 弹窗
+ * ============================================================ */
+.cp-slash-popup {
+  position: fixed;
+  z-index: var(--layer-menu, 100);
+  width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+}
+.cp-slash-popup .cp-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.cp-slash-popup .cp-slash-item.is-active {
+  background: var(--background-modifier-hover);
+}
+
+/* ============================================================
+ * 纯文字节点（无边框 / 无背景 / 无阴影）
+ * 像直接写在画布上的字，参考 Excalidraw/tldraw 的 text shape
+ * ============================================================ */
+.canvas-node.cp-plain {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.canvas-node.cp-plain .canvas-node-container {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.canvas-node.cp-plain .canvas-node-content {
+  background: transparent !important;
+}
+/* 选中时仍保留一个淡淡的虚线轮廓，便于知道选了哪个 */
+.canvas-node.cp-plain.is-selected,
+.canvas-node.cp-plain:hover {
+  outline: 1px dashed var(--text-muted);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+ * 节点形状（圆角 / 椭圆 / 菱形）——参考 tldraw/AFFiNE
+ * ============================================================ */
+.canvas-node.cp-shape-rounded .canvas-node-container {
+  border-radius: 16px;
+}
+.canvas-node.cp-shape-ellipse .canvas-node-container {
+  border-radius: 50%;
+}
+/* 菱形：用 clip-path 切角 */
+.canvas-node.cp-shape-diamond .canvas-node-container {
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  border-radius: 0;
+}
+
+/* 富文本工具条（选中文本片段时弹出） */
+.cp-text-format-toolbar {
+  position: fixed;
+  z-index: var(--layer-menu, 100);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+.cp-tf-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 14px;
+}
+.cp-tf-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* 智能吸附辅助线层已在 JS 里内联样式，这里补充线段光晕 */
+.cp-guide-layer line {
+  filter: drop-shadow(0 0 2px currentColor);
+}
+
+/* 白板右键子菜单（追加到原生菜单） */
+.cp-menu-submenu {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+  min-width: 180px;
+}
+.cp-menu-submenu .menu-item {
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cp-menu-submenu .menu-item:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* ============================================================
+ * 倒计时 / 秒表伪节点
+ * ============================================================ */
+.cp-timer-widget {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  text-align: center;
+}
+.cp-timer-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.cp-timer-value {
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-normal);
+}
+.cp-timer-value.cp-timer-done {
+  color: #e74c3c;
+}
+.cp-timer-btns {
+  display: flex;
+  gap: 6px;
+}
+.cp-timer-btns button {
+  padding: 3px 10px;
+  font-size: 12px;
+  background: var(--background-modifier-border);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-normal);
+}
+.cp-timer-btns button:hover {
+  background: var(--background-modifier-hover);
+}
+.canvas-node.cp-sticky .canvas-node-container {
+  border: none !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18) !important;
+}
+.canvas-node.cp-sticky .canvas-node-content {
+  font-family: "Segoe Print", "Comic Sans MS", "Caveat", cursive, var(--font-text);
+}
+.canvas-node.cp-sticky-yellow .canvas-node-container {
+  background: #fff3a3 !important;
+}
+.canvas-node.cp-sticky-pink .canvas-node-container {
+  background: #ffc6d9 !important;
+}
+.canvas-node.cp-sticky-blue .canvas-node-container {
+  background: #a3d4ff !important;
+}
+.canvas-node.cp-sticky-green .canvas-node-container {
+  background: #b5e8a3 !important;
+}
+
+/* 标记行本身隐藏（注释行） */
+.cm-line:has(> .cm-formatting-comment) {
+  /* HTML 注释在 Live Preview 下默认已较淡，这里不额外隐藏避免影响编辑 */
+}
+
+/* 阶段 1A 占位样式（布局/批量操作） */
+
+/* 通知样式（命令执行后的轻提示） */
+.cp-toast {
+  position: var(--layer-toast);
+  bottom: 24px;
+  right: 24px;
+  z-index: 100;
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}

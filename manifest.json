@@ -1,0 +1,10 @@
+{
+  "id": "canvas-plus",
+  "name": "Canvas Plus",
+  "version": "0.1.0",
+  "minAppVersion": "1.7.2",
+  "description": "增强 Obsidian 白板：自动布局、Markdown↔Canvas 互转、批量节点操作，以及飞书式编辑体验。",
+  "author": "pengxiwei",
+  "authorUrl": "",
+  "isDesktopOnly": true
+}
