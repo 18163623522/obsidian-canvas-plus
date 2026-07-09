@@ -128,36 +128,41 @@ function attachPasteHandler(dom: HTMLElement) {
   dom.addEventListener("paste", handler, true);
 }
 
-/** 主入口：轮询所有 Canvas 文本节点的 cm，注入 paste 拦截 */
+/** 主入口：统一在 document 级 capture 监听 paste，判断目标在编辑器内则转换表格 */
 export function setupTablePaste(plugin: Plugin): () => void {
-  const timer = setInterval(() => {
-    const leaves = plugin.app.workspace.getLeavesOfType("canvas");
-    if (!leaves.length) return;
-    const canvas = (leaves[0] as any).view?.canvas;
-    if (!canvas?.nodes) return;
-    for (const node of canvas.nodes.values()) {
-      const dom = node?.child?.editMode?.cm?.dom as HTMLElement | undefined;
-      if (dom) attachPasteHandler(dom);
-    }
-  }, 500);
-
-  // 笔记（MarkdownView）的 paste：在 document 级监听
-  const docHandler = (e: ClipboardEvent) => {
-    // 只处理目标在 .cm-editor 内的（编辑器粘贴）
+  // 统一 paste 处理：白板文本节点 + 笔记 MarkdownView
+  const onPaste = (e: ClipboardEvent) => {
     const target = e.target as HTMLElement | null;
-    if (!target || !target.closest(".cm-editor")) return;
-    // 排除 Canvas 的（已由上面处理；Canvas 的 cm 不在 .markdown-source-mode）
-    if (target.closest(".canvas-node")) return;
+    if (!target) return;
+    // 必须在 CM6 编辑器内
+    const cmEditor = target.closest(".cm-editor, .cm-content");
+    if (!cmEditor) return;
+
     const md = convertPasteEvent(e);
-    if (!md) return;
+    if (!md) return; // 不是表格，放行
+
     e.preventDefault();
     e.stopPropagation();
-    document.execCommand("insertText", false, md);
+
+    // 找到 CM6 EditorView 实例
+    const cmDom = cmEditor as HTMLElement;
+    const cm = (cmDom as any).cmView?.view ?? (cmDom as any).view;
+    if (cm && cm.state && cm.dispatch) {
+      const sel = cm.state.selection.main;
+      cm.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: md },
+        selection: { anchor: sel.from + md.length },
+      });
+      cm.focus();
+    } else {
+      // 兜底：execCommand
+      document.execCommand("insertText", false, md);
+    }
   };
-  document.addEventListener("paste", docHandler, true);
+  // capture 阶段拦截，确保在 Obsidian 内部处理之前
+  document.addEventListener("paste", onPaste, true);
 
   return () => {
-    clearInterval(timer);
-    document.removeEventListener("paste", docHandler, true);
+    document.removeEventListener("paste", onPaste, true);
   };
 }

@@ -1,28 +1,22 @@
 /**
- * 白板内 Slash 菜单（DOM 弹窗版）
+ * 白板内 Slash 菜单（input 事件版，更稳定）
  *
- * 原理：轮询 Canvas 节点的 child.editMode.cm，给每个 CM6 实例挂一个
- * keydown 监听器。检测到行首 `/` 输入时，弹出浮动面板，方向键选、回车确认。
- *
- * 不依赖 EditorSuggest（那只对 MarkdownView 生效），
- * 不依赖 autocompletion 扩展（需要 view 用 Compartment 构造）。
- * 直接操作 DOM + CM6 dispatch，最可靠。
+ * 原理：轮询 Canvas 节点的 child.editMode.cm，给每个 CM6 实例的 dom
+ * 挂 input 事件监听。检测到行首 / 时弹出浮动面板。
+ * 方向键/回车/ESC 用全局 keydown 监听处理（仅在弹窗打开时）。
  */
-import type { App, Plugin } from "obsidian";
-import { getSlashCompletions, applyCompletion, SlashCompletion } from "./slash-completions";
-
-// 注：App 暂未在本文件直接使用，但保留以匹配模块签名（applyCompletion 需要）
+import type { Plugin } from "obsidian";
+import { getSlashCompletions, applyCompletion } from "./slash-completions";
 
 const injected = new WeakSet<any>();
 let activePopup: HTMLElement | null = null;
-let activeItems: SlashCompletion[] = [];
+let activeItems: any[] = [];
 let activeIndex = 0;
 let activeCm: any = null;
 let activeSlashFrom = 0;
 
 export function setupCanvasSlash(plugin: Plugin): () => void {
   const uninstallers: Array<() => void> = [];
-  let attached = false;
 
   const injectOne = (cm: any) => {
     if (!cm || injected.has(cm)) return;
@@ -31,98 +25,74 @@ export function setupCanvasSlash(plugin: Plugin): () => void {
     if (!dom) return;
     injected.add(cm);
 
-    const onKeydown = (e: KeyboardEvent) => handleKeydown(e, cm);
-    dom.addEventListener("keydown", onKeydown, true);
-    // 记录以便卸载
-    (cm as any).__cpSlashHandler = onKeydown;
+    // 用 input 事件检测文本变化（比 keydown 更可靠）
+    const onInput = () => checkSlash(cm);
+    dom.addEventListener("input", onInput, false);
+    // 失焦时关闭
+    dom.addEventListener("blur", () => setTimeout(closePopup, 200), false);
   };
+
+  // 全局 keydown 处理弹窗导航（仅在弹窗打开时）
+  const onGlobalKeydown = (e: KeyboardEvent) => {
+    if (!activePopup) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); selectItem(activeIndex + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); selectItem(activeIndex - 1); }
+    else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); confirmItem(); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closePopup(); }
+  };
+  document.addEventListener("keydown", onGlobalKeydown, true);
+  uninstallers.push(() => document.removeEventListener("keydown", onGlobalKeydown, true));
 
   const attach = () => {
-    if (attached) return;
     const leaves = plugin.app.workspace.getLeavesOfType("canvas");
-    if (leaves.length === 0) return;
-    attached = true;
-
-    const timer = setInterval(() => {
-      const leaves2 = plugin.app.workspace.getLeavesOfType("canvas");
-      if (!leaves2.length) return;
-      const canvas = (leaves2[0] as any).view?.canvas;
-      if (!canvas?.nodes) return;
-      for (const node of canvas.nodes.values()) {
-        const cm = node?.child?.editMode?.cm;
-        if (cm) injectOne(cm);
-      }
-    }, 500);
-    uninstallers.push(() => clearInterval(timer));
-
-    // 点外面关闭弹窗
-    const onDocClick = (e: MouseEvent) => {
-      if (activePopup && !activePopup.contains(e.target as Node)) closePopup();
-    };
-    document.addEventListener("click", onDocClick);
-    uninstallers.push(() => document.removeEventListener("click", onDocClick));
-
-    console.log("[canvas-plus] canvas slash (DOM mode) attached");
+    if (!leaves.length) return;
+    const canvas = (leaves[0] as any).view?.canvas;
+    if (!canvas?.nodes) return;
+    for (const node of canvas.nodes.values()) {
+      const cm = node?.child?.editMode?.cm;
+      if (cm) injectOne(cm);
+    }
   };
 
+  const timer = setInterval(attach, 300);
   plugin.app.workspace.onLayoutReady(attach);
   const layoutRef = plugin.app.workspace.on("layout-change", attach);
 
+  // 点击外面关闭
+  const onDocClick = (e: MouseEvent) => {
+    if (activePopup && !activePopup.contains(e.target as Node)) closePopup();
+  };
+  document.addEventListener("click", onDocClick, true);
+  uninstallers.push(() => document.removeEventListener("click", onDocClick, true));
+
   return () => {
-    uninstallers.forEach((u) => u());
+    clearInterval(timer);
     plugin.app.workspace.offref(layoutRef);
+    uninstallers.forEach((u) => u());
   };
 }
 
-function handleKeydown(e: KeyboardEvent, cm: any) {
-  // 弹窗打开时，方向键/回车/ESC 由弹窗处理
-  if (activePopup) {
-    if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); selectItem(activeIndex + 1); return; }
-    if (e.key === "ArrowUp")   { e.preventDefault(); e.stopPropagation(); selectItem(activeIndex - 1); return; }
-    if (e.key === "Enter")     { e.preventDefault(); e.stopPropagation(); confirmItem(); return; }
-    if (e.key === "Escape")    { e.preventDefault(); e.stopPropagation(); closePopup(); return; }
-  }
-
-  // 检测 / 输入或后续字符
+/** 检查光标前是否有 / 触发 */
+function checkSlash(cm: any) {
   const pos = cm.state.selection.main.head;
   const line = cm.state.doc.lineAt(pos);
   const before = line.text.slice(0, pos - line.from);
-
-  // 输入 / 时（行首或空格后）
-  if (e.key === "/" && (before === "" || /\s$/.test(before))) {
-    // 等 / 实际插入后再弹
-    setTimeout(() => maybeOpenPopup(cm, pos + 1), 0);
+  // 行首或空格后的 /
+  const m = before.match(/(?:^|\s)\/([\w\u4e00-\u9fa5]*)$/);
+  if (!m) {
+    if (activePopup) closePopup();
     return;
   }
-
-  // 弹窗已开，继续输入过滤
-  if (activePopup && /^[a-zA-Z0-9\u4e00-\u9fa5]$/.test(e.key)) {
-    setTimeout(() => updatePopupFilter(cm), 0);
-  }
-  // 退格可能改变 query
-  if (activePopup && e.key === "Backspace") {
-    setTimeout(() => updatePopupFilter(cm), 0);
-  }
-}
-
-function maybeOpenPopup(cm: any, slashPos: number) {
+  const query = m[1].toLowerCase();
+  const slashPos = pos - m[0].length + (m[0].startsWith("/") ? 0 : 1);
   activeCm = cm;
-  activeSlashFrom = slashPos - 1; // / 的位置
-  activeItems = getSlashCompletions("");
-  activeIndex = 0;
-  renderPopup(cm);
-}
-
-function updatePopupFilter(cm: any) {
-  const pos = cm.state.selection.main.head;
-  const line = cm.state.doc.lineAt(pos);
-  const text = line.text.slice(activeSlashFrom - line.from, pos - line.from);
-  // 如果 / 已被删或前面不再是 /，关闭
-  if (!text.startsWith("/")) { closePopup(); return; }
-  const query = text.slice(1);
+  activeSlashFrom = slashPos;
   activeItems = getSlashCompletions(query);
   activeIndex = 0;
-  if (activeItems.length === 0) { closePopup(); return; }
+  if (activeItems.length === 0) {
+    closePopup();
+    return;
+  }
   renderPopup(cm);
 }
 
@@ -145,11 +115,9 @@ function renderPopup(cm: any) {
 
 function positionPopup(cm: any) {
   if (!activePopup) return;
-  // 用光标处的屏幕坐标（CM6 提供 coordsAtPos）
   const pos = cm.state.selection.main.head;
   const coords = cm.coordsAtPos?.(pos);
   if (!coords) return;
-  const rect = activePopup.getBoundingClientRect();
   activePopup.style.left = `${coords.left}px`;
   activePopup.style.top = `${coords.bottom + 4}px`;
 }
@@ -165,7 +133,6 @@ function selectItem(i: number) {
 function confirmItem() {
   const item = activeItems[activeIndex];
   if (!item || !activeCm) return;
-  // 删除 / 及后续 query
   const pos = activeCm.state.selection.main.head;
   activeCm.dispatch({ changes: { from: activeSlashFrom, to: pos, insert: "" } });
   closePopup();

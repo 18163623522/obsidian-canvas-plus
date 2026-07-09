@@ -202,12 +202,61 @@
   background: var(--background-modifier-hover);
 }
 
-/* 智能吸附辅助线层已在 JS 里内联样式，这里补充线段光晕 */
+/* 字号缩放（CSS class 方式，同时作用于 nodeEl 和 CM6 编辑器 DOM） */
+.canvas-node.cp-scale-0-85,
+.cp-scale-0-85 .cm-content { font-size: 0.85em !important; }
+.canvas-node.cp-scale-1-1,
+.cp-scale-1-1 .cm-content { font-size: 1.1em !important; }
+.canvas-node.cp-scale-1-2,
+.cp-scale-1-2 .cm-content { font-size: 1.2em !important; }
+.canvas-node.cp-scale-1-5,
+.cp-scale-1-5 .cm-content { font-size: 1.5em !important; }
+.canvas-node.cp-scale-2,
+.cp-scale-2 .cm-content { font-size: 2em !important; }
+
+/* 画笔标注层 */
+.cp-pen-layer {
+  pointer-events: none;
+}
+.cp-pen-layer path {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.15));
+}
+
+/* 图层管理 */
+.canvas-node.cp-locked .canvas-node-container {
+  pointer-events: none;
+}
+.canvas-node.cp-locked::after {
+  content: "🔒";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+.canvas-node.cp-hidden {
+  display: none !important;
+}
 .cp-guide-layer line {
   filter: drop-shadow(0 0 2px currentColor);
 }
 
-/* 白板右键子菜单（追加到原生菜单） */
+/* iframe 嵌入节点 */
+.cp-iframe-widget {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.cp-iframe-fallback {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 14px;
+}
+
 .cp-menu-submenu {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);

@@ -73,14 +73,9 @@ function attachDragHandlers(nodeEl: HTMLElement, node: any, canvas: any) {
 
   const onMove = (e: PointerEvent) => {
     if (!dragging) return;
-    // 节点正在被原生拖动；读取当前 node.x/y 计算对齐
+    // 只画辅助线，不修改位置（避免与原生拖拽冲突导致抖动）
     const snap = computeSnap(node, canvas);
     drawGuides(canvas, snap.guides);
-    // 吸附：若检测到吸附且用户接近，微调位置
-    if (snap.adjustX !== 0 || snap.adjustY !== 0) {
-      const d = node.getData();
-      node.setData?.({ ...d, x: d.x + snap.adjustX, y: d.y + snap.adjustY });
-    }
   };
 
   const onUp = () => {

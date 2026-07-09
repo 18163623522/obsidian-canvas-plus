@@ -28,6 +28,11 @@ import {
 } from "./canvas/plain-text";
 import { createStickyNode } from "./canvas/node-styles";
 import { expandMindmap, mindmapFromNote } from "./canvas/mindmap";
+import { expandOneDegree, expandTwoDegrees } from "./canvas/graph-expand";
+import { createIframeNode, setupIframeNodes } from "./canvas/iframe-node";
+import { setupPenLayer, setPenMode, clearStrokes, getPenMode } from "./canvas/pen-layer";
+import type { PenMode } from "./canvas/pen-layer";
+import { toggleLock, toggleHide, bringToFront, sendToBack, applyLayerStyle } from "./canvas/layers";
 import { setupTablePaste } from "./canvas/table-paste";
 import {
   insertTable,
@@ -73,6 +78,8 @@ export default class CanvasPlusPlugin extends Plugin {
   private uninstallDrop?: () => void;
   private uninstallTimers?: () => void;
   private uninstallContextMenu?: () => void;
+  private uninstallIframe?: () => void;
+  private uninstallPen?: () => void;
   private textFormatToolbar!: TextFormatToolbar;
 
   async onload() {
@@ -147,6 +154,10 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallTimers = setupTimerNodes(this);
     // 10. 白板右键菜单（插入节点/布局/样式）
     this.uninstallContextMenu = setupContextMenu(this);
+    // 11. 网页 iframe 嵌入伪节点
+    this.uninstallIframe = setupIframeNodes(this);
+    // 12. 自由画笔标注层
+    this.uninstallPen = setupPenLayer(this);
 
     // ——————————————————————————————————————————————
     //  纯文字节点命令
@@ -231,6 +242,30 @@ export default class CanvasPlusPlugin extends Plugin {
       },
     });
 
+    // ----------------------------------------------
+    //  知识图谱展开命令
+    // ----------------------------------------------
+    this.addCommand({
+      id: "graph-expand-1",
+      name: "知识图谱：展开选中节点 1 度链接",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        expandOneDegree(this.app, canvas);
+      },
+    });
+    this.addCommand({
+      id: "graph-expand-2",
+      name: "知识图谱：展开选中节点 2 度链接",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        expandTwoDegrees(this.app, canvas);
+      },
+    });
+
     // ——————————————————————————————————————————————
     //  一键插入新节点（图片/PDF/视频/公式/Mermaid/代码/计时器）
     // ——————————————————————————————————————————————
@@ -262,6 +297,10 @@ export default class CanvasPlusPlugin extends Plugin {
       }
     });
     insertCmd("insert-stopwatch", "插入：秒表节点", (c) => createStopwatchNode(c));
+    insertCmd("insert-iframe", "插入：网页嵌入", (c) => {
+      const url = window.prompt("输入网址（https://...）", "https://");
+      if (url) createIframeNode(c, url);
+    });
     this.addCommand({
       id: "diagnose-timers",
       name: "（诊断）倒计时节点渲染链路",
@@ -491,6 +530,8 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallDrop?.();
     this.uninstallTimers?.();
     this.uninstallContextMenu?.();
+    this.uninstallIframe?.();
+    this.uninstallPen?.();
     this.toolbar?.destroy();
   }
 

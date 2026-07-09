@@ -9,6 +9,7 @@
  */
 import type { App, Plugin } from "obsidian";
 import type { Canvas, CanvasNode } from "../types/canvas-internal";
+import { applyLayerStyle } from "./layers";
 
 // ============== 标记字段定义 ==============
 export const FLAG_STYLE = "cpStyle"; // "plain" 纯文字
@@ -34,7 +35,7 @@ const ALL_FLAGS = [FLAG_STYLE, FLAG_SHAPE, FLAG_STICKY, FLAG_TEXT_SCALE];
 // ============== 轮询器：把 nodeData 标记同步到 DOM class ==============
 export function setupNodeStyles(plugin: Plugin): () => void {
   const apply = () => applyAllStyles(plugin.app);
-  const timer = setInterval(apply, 400);
+  const timer = setInterval(apply, 200);
   const layoutRef = plugin.app.workspace.on("layout-change", apply);
   plugin.app.workspace.onLayoutReady(apply);
   return () => {
@@ -102,7 +103,7 @@ export function applyNodeStyle(node: CanvasNode): void {
   const data = node.getData?.() ?? (node as any).nodeData;
   if (!data) return;
   const nodeEl = (node as any).nodeEl as HTMLElement | undefined;
-  if (!nodeEl) return;
+  if (!nodeEl || !document.contains(nodeEl)) return; // 节点 DOM 不存在（懒渲染），跳过
 
   // 清除旧的 cp-* class（保留非 cp 的）
   const classes = Array.from(nodeEl.classList).filter((c) => !c.startsWith("cp-"));
@@ -114,11 +115,30 @@ export function applyNodeStyle(node: CanvasNode): void {
   if (data[FLAG_SHAPE]) nodeEl.classList.add(`cp-shape-${data[FLAG_SHAPE]}`);
   // 便签
   if (data[FLAG_STICKY]) nodeEl.classList.add(`cp-sticky`, `cp-sticky-${data[FLAG_STICKY]}`);
-  // 字号缩放（持久化版）
-  if (data[FLAG_TEXT_SCALE]) {
-    const contentEl = (node as any).contentEl as HTMLElement | undefined;
-    if (contentEl) contentEl.style.fontSize = `${data[FLAG_TEXT_SCALE]}em`;
+
+  // 字号缩放：contentEl 设了不够，要设到 markdown-preview-view（阅读视图渲染层）
+  const scale = data[FLAG_TEXT_SCALE];
+  if (scale) {
+    nodeEl.classList.add(`cp-scale-${String(scale).replace(".", "-")}`);
+    const setFontSize = () => {
+      const ce = (node as any).contentEl as HTMLElement | undefined;
+      if (!ce) return;
+      // 阅读视图渲染层：markdown-preview-view 不继承父级 font-size
+      const targets = ce.querySelectorAll(".markdown-preview-view, .markdown-preview-sizer, .markdown-embed-content");
+      targets.forEach((t: any) => {
+        t.style.setProperty("font-size", `${scale}em`, "important");
+      });
+      // 编辑态 CM6
+      const cmContent = (node as any).child?.editMode?.cm?.dom?.querySelector?.(".cm-content") as HTMLElement | undefined;
+      if (cmContent) cmContent.style.setProperty("font-size", `${scale}em`, "important");
+    };
+    setFontSize();
+    setTimeout(setFontSize, 100);
+    setTimeout(setFontSize, 500);
   }
+
+  // 图层样式（锁定/隐藏）
+  applyLayerStyle(node);
 }
 
 // ============== 便捷 setter ==============
@@ -135,7 +155,10 @@ function setFlag(node: CanvasNode, flag: string, value: any): void {
   if (flag === FLAG_STICKY) delete newData[FLAG_SHAPE];
   (node as any).setData?.(newData);
   node.canvas?.requestSave?.();
+  // 立即应用一次 + 延迟再应用两次（setData 触发 DOM 重建，需等重建完才生效）
   applyNodeStyle(node);
+  setTimeout(() => applyNodeStyle(node), 50);
+  setTimeout(() => applyNodeStyle(node), 200);
 }
 
 // —— 纯文字 ——
