@@ -348,13 +348,13 @@ export class FloatingToolbar {
       this.hide();
       return;
     }
-    const cx = (minX + maxX) / 2;
     const tbRect = this.el.getBoundingClientRect();
-    const left = cx - tbRect.width / 2;
-    // 放连线下方
-    const top = maxY + 8;
-    this.el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8))}px`;
-    this.el.style.top = `${Math.min(top, window.innerHeight - tbRect.height - 8)}px`;
+    // 放连线右侧
+    const left = maxX + 8;
+    const finalLeft = left + tbRect.width < window.innerWidth - 8 ? left : minX - tbRect.width - 8;
+    this.el.style.flexDirection = "column";
+    this.el.style.left = `${Math.max(8, finalLeft)}px`;
+    this.el.style.top = `${Math.max(8, Math.min(minY, window.innerHeight - tbRect.height - 8))}px`;
   }
 
   /** 定位到选中节点集合的包围盒上方居中 */
@@ -374,13 +374,15 @@ export class FloatingToolbar {
       this.hide();
       return;
     }
-    const width = maxX - minX;
     const tbRect = this.el.getBoundingClientRect();
-    const left = minX + width / 2 - tbRect.width / 2;
-    // 放节点下方，彻底避开原生工具条（原生在上方）
-    const top = maxY + 8;
-    this.el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8))}px`;
-    this.el.style.top = `${Math.min(top, window.innerHeight - tbRect.height - 8)}px`;
+    // 放节点右侧，竖向排列
+    const left = maxX + 8;
+    const top = minY;
+    // 右侧空间不够时放左侧
+    const finalLeft = left + tbRect.width < window.innerWidth - 8 ? left : minX - tbRect.width - 8;
+    this.el.style.flexDirection = "column";
+    this.el.style.left = `${Math.max(8, finalLeft)}px`;
+    this.el.style.top = `${Math.max(8, Math.min(top, window.innerHeight - tbRect.height - 8))}px`;
   }
 
   hide(): void {
