@@ -349,17 +349,19 @@ export class FloatingToolbar {
       return;
     }
     const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
     const tbRect = this.el.getBoundingClientRect();
-    this.el.style.left = `${Math.max(8, cx - tbRect.width / 2)}px`;
-    this.el.style.top = `${Math.max(8, minY - tbRect.height - 10)}px`;
+    const left = cx - tbRect.width / 2;
+    const topAbove = minY - tbRect.height - 52;
+    const topBelow = maxY + 12;
+    const top = topAbove >= 8 ? topAbove : topBelow;
+    this.el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8))}px`;
+    this.el.style.top = `${Math.max(8, top)}px`;
   }
 
   /** 定位到选中节点集合的包围盒上方居中 */
   private position(nodes: CanvasNode[]): void {
     if (!this.el) return;
-    // 合并所有选中节点的屏幕矩形
-    let minX = Infinity, minY = Infinity, maxX = -Infinity;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of nodes) {
       const nodeEl = (n as any).nodeEl as HTMLElement | undefined;
       if (!nodeEl) continue;
@@ -367,6 +369,7 @@ export class FloatingToolbar {
       if (r.left < minX) minX = r.left;
       if (r.top < minY) minY = r.top;
       if (r.right > maxX) maxX = r.right;
+      if (r.bottom > maxY) maxY = r.bottom;
     }
     if (minX === Infinity) {
       this.hide();
@@ -375,8 +378,11 @@ export class FloatingToolbar {
     const width = maxX - minX;
     const tbRect = this.el.getBoundingClientRect();
     const left = minX + width / 2 - tbRect.width / 2;
-    const top = minY - tbRect.height - 10;
-    this.el.style.left = `${Math.max(8, left)}px`;
+    // 上方留 52px 给 Obsidian 原生工具条；空间不够时放下方
+    const topAbove = minY - tbRect.height - 52;
+    const topBelow = maxY + 12;
+    const top = topAbove >= 8 ? topAbove : topBelow;
+    this.el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8))}px`;
     this.el.style.top = `${Math.max(8, top)}px`;
   }
 
