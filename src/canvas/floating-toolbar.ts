@@ -351,11 +351,10 @@ export class FloatingToolbar {
     const cx = (minX + maxX) / 2;
     const tbRect = this.el.getBoundingClientRect();
     const left = cx - tbRect.width / 2;
-    const topAbove = minY - tbRect.height - 52;
-    const topBelow = maxY + 12;
-    const top = topAbove >= 8 ? topAbove : topBelow;
+    // 放连线下方
+    const top = maxY + 8;
     this.el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8))}px`;
-    this.el.style.top = `${Math.max(8, top)}px`;
+    this.el.style.top = `${Math.min(top, window.innerHeight - tbRect.height - 8)}px`;
   }
 
   /** 定位到选中节点集合的包围盒上方居中 */
@@ -378,12 +377,10 @@ export class FloatingToolbar {
     const width = maxX - minX;
     const tbRect = this.el.getBoundingClientRect();
     const left = minX + width / 2 - tbRect.width / 2;
-    // 上方留 52px 给 Obsidian 原生工具条；空间不够时放下方
-    const topAbove = minY - tbRect.height - 52;
-    const topBelow = maxY + 12;
-    const top = topAbove >= 8 ? topAbove : topBelow;
+    // 放节点下方，彻底避开原生工具条（原生在上方）
+    const top = maxY + 8;
     this.el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8))}px`;
-    this.el.style.top = `${Math.max(8, top)}px`;
+    this.el.style.top = `${Math.min(top, window.innerHeight - tbRect.height - 8)}px`;
   }
 
   hide(): void {
