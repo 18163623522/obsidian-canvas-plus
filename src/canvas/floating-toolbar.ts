@@ -94,140 +94,103 @@ export class FloatingToolbar {
     const el = this.ensureEl();
     el.empty();
     el.style.display = "flex";
+    el.style.flexDirection = "column";
 
-    const single = nodes.length === 1;
-    const n0 = nodes[0];
+    // 辅助：创建一个带标题的分组
+    const makeGroup = (title: string): HTMLElement => {
+      const g = el.createDiv({ cls: "cp-tb-section" });
+      if (title) g.createDiv({ cls: "cp-tb-section-title", text: title });
+      const row = g.createDiv({ cls: "cp-tb-group" });
+      return row;
+    };
+    // 辅助：创建按钮
+    const btn = (parent: HTMLElement, label: string, title: string, onClick: () => void): HTMLElement => {
+      const b = parent.createEl("button", { cls: "cp-tb-btn", attr: { title, "aria-label": title } });
+      b.textContent = label;
+      b.onclick = onClick;
+      return b;
+    };
 
-    // —— 颜色按钮组 ——
-    const colorGroup = el.createDiv({ cls: "cp-tb-group" });
+    // -- 颜色 --
+    const colorRow = makeGroup("颜色");
     for (const [key, info] of Object.entries(COLORS)) {
-      const btn = colorGroup.createEl("button", {
-        cls: "cp-tb-btn cp-color-btn",
-        attr: { "aria-label": `颜色：${info.label}`, title: `颜色：${info.label}` },
-      });
-      btn.style.background = info.bg;
-      btn.onclick = () => {
+      const b = btn(colorRow, "", `颜色：${info.label}`, () => {
         for (const n of nodes) {
-          try {
-            if (key === "none") (n as any).setColor?.("");
-            else (n as any).setColor?.(key);
-          } catch (e) {
-            console.error(e);
-          }
+          try { if (key === "none") (n as any).setColor?.(""); else (n as any).setColor?.(key); } catch (e) { console.error(e); }
         }
-      };
+      });
+      b.classList.add("cp-color-btn");
+      b.style.background = info.bg;
     }
 
-    el.createDiv({ cls: "cp-tb-divider" });
-
-    // —— 字号（持久化版，写进 nodeData.cpTextScale） ——
-    const sizeGroup = el.createDiv({ cls: "cp-tb-group" });
+    // -- 字号 --
+    const sizeRow = makeGroup("字号");
     for (const sz of [
       { label: "A-", scale: 0.85, title: "缩小" },
       { label: "A", scale: undefined, title: "标准" },
       { label: "A+", scale: 1.2, title: "放大" },
       { label: "A++", scale: 1.5, title: "更大" },
     ]) {
-      const btn = sizeGroup.createEl("button", { cls: "cp-tb-btn cp-size-btn", attr: { title: sz.title } });
-      btn.textContent = sz.label;
-      btn.onclick = async () => {
+      btn(sizeRow, sz.label, sz.title, async () => {
         const { setTextScale } = await import("./node-styles");
         for (const n of nodes) setTextScale(n, sz.scale);
-      };
-    }
-
-    el.createDiv({ cls: "cp-tb-divider" });
-
-    // —— 对齐/分布（需多选） ——
-    const alignGroup = el.createDiv({ cls: "cp-tb-group" });
-    const aligns = [
-      { icon: "⇤", title: "左对齐", fn: () => this.alignLeft(nodes) },
-      { icon: "↔", title: "水平居中", fn: () => this.alignHCenter(nodes) },
-      { icon: "⇥", title: "右对齐", fn: () => this.alignRight(nodes) },
-      { icon: "⇧", title: "顶对齐", fn: () => this.alignTop(nodes) },
-      { icon: "↕", title: "垂直居中", fn: () => this.alignVCenter(nodes) },
-      { icon: "⇩", title: "底对齐", fn: () => this.alignBottom(nodes) },
-      { icon: "⥆", title: "水平等距", fn: () => this.distributeH(nodes) },
-      { icon: "⇅", title: "垂直等距", fn: () => this.distributeV(nodes) },
-    ];
-    for (const a of aligns) {
-      const btn = alignGroup.createEl("button", {
-        cls: "cp-tb-btn cp-align-btn",
-        attr: { title: a.title, "aria-label": a.title },
       });
-      btn.textContent = a.icon;
-      btn.onclick = a.fn;
     }
 
-    el.createDiv({ cls: "cp-tb-divider" });
-
-    // —— 切换纯文字 / 卡片 ——
-    const plainBtn = el.createEl("button", {
-      cls: "cp-tb-btn cp-plain-btn",
-      attr: { title: "切换纯文字（无边框）/ 卡片样式", "aria-label": "切换纯文字/卡片" },
-    });
-    plainBtn.textContent = "T̄";
-    plainBtn.onclick = async () => {
+    // -- 样式 --
+    const styleRow = makeGroup("样式");
+    btn(styleRow, "T̄", "切换纯文字/卡片", async () => {
       const { togglePlain } = await import("./plain-text");
       for (const n of nodes) togglePlain(n);
       this.hide();
-    };
+    });
+    btn(styleRow, "📋", "转便签（黄）", async () => {
+      const { setSticky } = await import("./node-styles");
+      for (const n of nodes) setSticky(n, "yellow");
+      this.hide();
+    });
 
-    el.createDiv({ cls: "cp-tb-divider" });
-
-    // —— 形状（圆角/椭圆/菱形） ——
-    const shapeGroup = el.createDiv({ cls: "cp-tb-group" });
+    // -- 形状 --
+    const shapeRow = makeGroup("形状");
     for (const shape of [
-      { icon: "▭", value: undefined, title: "矩形（默认）" },
+      { icon: "▭", value: undefined, title: "矩形" },
       { icon: "▢", value: "rounded" as const, title: "圆角" },
       { icon: "○", value: "ellipse" as const, title: "椭圆" },
       { icon: "◇", value: "diamond" as const, title: "菱形" },
     ]) {
-      const btn = shapeGroup.createEl("button", {
-        cls: "cp-tb-btn cp-shape-btn",
-        attr: { title: shape.title, "aria-label": shape.title },
-      });
-      btn.textContent = shape.icon;
-      btn.onclick = async () => {
+      btn(shapeRow, shape.icon, shape.title, async () => {
         const { setShape } = await import("./node-styles");
         for (const n of nodes) setShape(n, shape.value);
         this.hide();
-      };
+      });
     }
 
-    // —— 便签 ——
-    const stickyGroup = el.createDiv({ cls: "cp-tb-group" });
-    const stickyBtn = stickyGroup.createEl("button", {
-      cls: "cp-tb-btn cp-sticky-btn",
-      attr: { title: "转便签（黄）", "aria-label": "便签" },
-    });
-    stickyBtn.textContent = "📋";
-    stickyBtn.onclick = async () => {
-      const { setSticky } = await import("./node-styles");
-      for (const n of nodes) setSticky(n, "yellow");
+    // -- 对齐（多选时才有意义） --
+    if (nodes.length >= 2) {
+      const alignRow = makeGroup("对齐");
+      const aligns = [
+        { icon: "⇤", title: "左对齐", fn: () => this.alignLeft(nodes) },
+        { icon: "↔", title: "水平居中", fn: () => this.alignHCenter(nodes) },
+        { icon: "⇥", title: "右对齐", fn: () => this.alignRight(nodes) },
+        { icon: "⇧", title: "顶对齐", fn: () => this.alignTop(nodes) },
+        { icon: "↕", title: "垂直居中", fn: () => this.alignVCenter(nodes) },
+        { icon: "⇩", title: "底对齐", fn: () => this.alignBottom(nodes) },
+      ];
+      for (const a of aligns) btn(alignRow, a.icon, a.title, a.fn);
+      const distRow = makeGroup("分布");
+      btn(distRow, "⥆", "水平等距", () => this.distributeH(nodes));
+      btn(distRow, "⇅", "垂直等距", () => this.distributeV(nodes));
+    }
+
+    // -- 删除 --
+    const delRow = makeGroup("");
+    const delBtn = btn(delRow, "🗑", "删除选中", () => {
+      for (const n of nodes) { try { (n.canvas as any)?.removeNode?.(n); } catch (e) { console.error(e); } }
       this.hide();
-    };
-
-    el.createDiv({ cls: "cp-tb-divider" });
-
-    // —— 删除 ——
-    const delBtn = el.createEl("button", {
-      cls: "cp-tb-btn cp-delete-btn",
-      attr: { title: "删除选中", "aria-label": "删除选中" },
     });
-    delBtn.textContent = "🗑";
-    delBtn.onclick = () => {
-      for (const n of nodes) {
-        try {
-          (n.canvas as any)?.removeNode?.(n);
-        } catch (e) {
-          console.error(e);
-        }
-      }
-      this.hide();
-    };
+    delBtn.classList.add("cp-delete-btn");
 
-    // —— 定位 ——
+    // -- 定位 --
     this.position(nodes);
   }
 
