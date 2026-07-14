@@ -57,6 +57,8 @@ import {
   diagnoseTimers,
 } from "./canvas/timer-node";
 import { setupContextMenu } from "./canvas/context-menu";
+import { setupTabConnect } from "./canvas/tab-connect";
+import { searchInNode } from "./canvas/node-search";
 import {
   CanvasPlusSettings,
   DEFAULT_SETTINGS,
@@ -77,6 +79,7 @@ export default class CanvasPlusPlugin extends Plugin {
   private uninstallTimers?: () => void;
   private uninstallContextMenu?: () => void;
   private uninstallIframe?: () => void;
+  private uninstallTab?: () => void;
   private textFormatToolbar!: TextFormatToolbar;
 
   async onload() {
@@ -153,6 +156,8 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallContextMenu = setupContextMenu(this);
     // 11. 网页 iframe 嵌入伪节点
     this.uninstallIframe = setupIframeNodes(this);
+    // 12. Tab 键补全连线
+    this.uninstallTab = setupTabConnect(this);
 
     // ——————————————————————————————————————————————
     //  纯文字节点命令
@@ -307,6 +312,21 @@ export default class CanvasPlusPlugin extends Plugin {
         new Notice("已扫描，请看 Console (Ctrl+Shift+I) 里 [cp-timer] 日志");
       },
     });
+
+    // ----------------------------------------------
+    //  节点内嵌搜索命令
+    // ----------------------------------------------
+    this.addCommand({
+      id: "node-search",
+      name: "搜索节点内容",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        searchInNode(this.app, canvas);
+      },
+    });
+
 
     // ——————————————————————————————————————————————
     //  表格命令（笔记 + 白板通用，作用于当前编辑器）
@@ -526,6 +546,7 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallTimers?.();
     this.uninstallContextMenu?.();
     this.uninstallIframe?.();
+    this.uninstallTab?.();
     this.toolbar?.destroy();
   }
 
