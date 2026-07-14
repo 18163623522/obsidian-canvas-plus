@@ -40,7 +40,7 @@ import {
   tableDeleteColumn,
   tableAlign,
 } from "./canvas/table-edit";
-import { setupSmartSnap } from "./canvas/smart-snap";
+import { setupSmartSnap, setSnapEnabled } from "./canvas/smart-snap";
 import { TextFormatToolbar } from "./canvas/text-format-toolbar";
 import {
   insertMathNode,
@@ -96,6 +96,7 @@ export default class CanvasPlusPlugin extends Plugin {
       (this as any).__cpWriteLog = write;
 
       await this.loadSettings();
+      setSnapEnabled(this.settings.smartSnap);
       write("settings loaded");
       this.addSettingTab(new CanvasPlusSettingTab(this.app, this));
       write("setting tab added");

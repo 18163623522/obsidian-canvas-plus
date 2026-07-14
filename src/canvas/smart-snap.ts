@@ -11,6 +11,13 @@
  */
 import type { Plugin } from "obsidian";
 
+let snapEnabled = false;
+
+/** 外部调用更新开关状态 */
+export function setSnapEnabled(enabled: boolean): void {
+  snapEnabled = enabled;
+}
+
 const SNAP_THRESHOLD = 6; // 像素，画布坐标系下
 const injectedNodes = new WeakSet<HTMLElement>();
 let guideLayer: SVGElement | null = null;
@@ -61,7 +68,7 @@ function attachDragHandlers(nodeEl: HTMLElement, node: any, canvas: any) {
   let startX = 0, startY = 0;
 
   const onDown = (e: PointerEvent) => {
-    // 仅鼠标左键、且不是在文本编辑区
+    if (!snapEnabled) return; // 开关关闭时不吸附
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest(".cm-editor, textarea, input")) return;
     dragging = true;

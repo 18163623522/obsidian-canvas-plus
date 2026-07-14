@@ -58,19 +58,26 @@ export function setupTabConnect(plugin: Plugin): () => void {
   };
 }
 
+/** 记录每个节点的子节点数（用于 Tab 偏移） */
+const childCount = new Map<string, number>();
+
 /** 创建一个新节点并连线到源节点 */
 function createConnectedNode(canvas: any, sourceNode: any, direction: "right" | "bottom") {
   const data = sourceNode.getData();
+  const count = childCount.get(data.id) ?? 0;
+  childCount.set(data.id, count + 1);
+
+  const offsetY = count * 90; // 每个子节点下移 90px
   let nx: number, ny: number;
   let fromSide: string, toSide: string;
 
   if (direction === "right") {
     nx = data.x + data.width + 80;
-    ny = data.y;
+    ny = data.y + offsetY;
     fromSide = "right";
     toSide = "left";
   } else {
-    nx = data.x;
+    nx = data.x + offsetY;
     ny = data.y + data.height + 80;
     fromSide = "bottom";
     toSide = "top";

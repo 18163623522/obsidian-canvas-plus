@@ -17,6 +17,8 @@ export interface CanvasPlusSettings {
   bulkLinkEdges: boolean;
   /** 批量生成上限 */
   bulkLimit: number;
+  /** 智能吸附辅助线开关 */
+  smartSnap: boolean;
 }
 
 export const DEFAULT_SETTINGS: CanvasPlusSettings = {
@@ -26,6 +28,7 @@ export const DEFAULT_SETTINGS: CanvasPlusSettings = {
   dagRankdir: "LR",
   bulkLinkEdges: true,
   bulkLimit: 100,
+  smartSnap: false,
 };
 
 export class CanvasPlusSettingTab extends PluginSettingTab {
@@ -120,6 +123,21 @@ export class CanvasPlusSettingTab extends PluginSettingTab {
             this.plugin.settings.bulkLimit = n;
             await this.plugin.saveSettings();
           }
+        });
+      });
+
+
+    // -- 交互 --
+    containerEl.createEl("h3", { text: "交互" });
+
+    new Setting(containerEl)
+      .setName("智能吸附辅助线")
+      .setDesc("拖动节点时显示对齐辅助线和间距数值。关闭后拖动更流畅。")
+      .addToggle((t) => {
+        t.setValue(this.plugin.settings.smartSnap);
+        t.onChange(async (v) => {
+          this.plugin.settings.smartSnap = v;
+          await this.plugin.saveSettings();
         });
       });
 
