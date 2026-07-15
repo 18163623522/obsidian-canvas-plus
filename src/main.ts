@@ -59,6 +59,11 @@ import {
 import { setupContextMenu } from "./canvas/context-menu";
 import { setupTabConnect } from "./canvas/tab-connect";
 import { searchInNode } from "./canvas/node-search";
+import { setupAltDuplicate } from "./canvas/alt-duplicate";
+import { setupCommentNodes, createCommentNode } from "./canvas/comment-node";
+import { saveCurrentView, gotoView, deleteView } from "./canvas/view-bookmark";
+import { exportImage } from "./canvas/export-image";
+import { setupGuides, placeHorizontalGuide, placeVerticalGuide, clearGuides } from "./canvas/persistent-guides";
 import {
   CanvasPlusSettings,
   DEFAULT_SETTINGS,
@@ -80,6 +85,9 @@ export default class CanvasPlusPlugin extends Plugin {
   private uninstallContextMenu?: () => void;
   private uninstallIframe?: () => void;
   private uninstallTab?: () => void;
+  private uninstallAltDup?: () => void;
+  private uninstallComments?: () => void;
+  private uninstallGuides?: () => void;
   private textFormatToolbar!: TextFormatToolbar;
 
   async onload() {
@@ -159,6 +167,12 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallIframe = setupIframeNodes(this);
     // 12. Tab 键补全连线
     this.uninstallTab = setupTabConnect(this);
+    // 13. Alt+拖拽复制
+    this.uninstallAltDup = setupAltDuplicate(this);
+    // 14. 评论节点渲染
+    this.uninstallComments = setupCommentNodes(this);
+    // 15. 持久参考线
+    this.uninstallGuides = setupGuides(this);
 
     // ——————————————————————————————————————————————
     //  纯文字节点命令
@@ -325,6 +339,92 @@ export default class CanvasPlusPlugin extends Plugin {
         if (!canvas) return false;
         if (checking) return true;
         searchInNode(this.app, canvas);
+      },
+    });
+
+
+    // ----------------------------------------------
+    //  Alt复制 / 评论 / 视图书签 / 导出 / 参考线
+    // ----------------------------------------------
+    this.addCommand({
+      id: "add-comment",
+      name: "添加评论",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        const sel = Array.from(canvas.selection.values()).filter((n: any) => n?.getData?.()?.type);
+        createCommentNode(canvas, this.app, sel[0] as any);
+      },
+    });
+    this.addCommand({
+      id: "save-view",
+      name: "视图书签：保存当前视图",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        saveCurrentView(this.app, canvas);
+      },
+    });
+    this.addCommand({
+      id: "goto-view",
+      name: "视图书签：跳转到视图",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        gotoView(this.app, canvas);
+      },
+    });
+    this.addCommand({
+      id: "delete-view",
+      name: "视图书签：删除视图",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        deleteView(this.app, canvas);
+      },
+    });
+    this.addCommand({
+      id: "export-image",
+      name: "导出画布为高清图片",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        exportImage(this.app, canvas);
+      },
+    });
+    this.addCommand({
+      id: "guide-horizontal",
+      name: "参考线：放置水平线",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        placeHorizontalGuide(this.app, canvas);
+      },
+    });
+    this.addCommand({
+      id: "guide-vertical",
+      name: "参考线：放置垂直线",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        placeVerticalGuide(this.app, canvas);
+      },
+    });
+    this.addCommand({
+      id: "guide-clear",
+      name: "参考线：清除所有",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        clearGuides(canvas);
       },
     });
 
@@ -548,6 +648,9 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallContextMenu?.();
     this.uninstallIframe?.();
     this.uninstallTab?.();
+    this.uninstallAltDup?.();
+    this.uninstallComments?.();
+    this.uninstallGuides?.();
     this.toolbar?.destroy();
   }
 

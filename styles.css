@@ -267,6 +267,44 @@
   font-size: 14px;
 }
 
+/* 评论/批注节点 */
+.cp-comment-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  font-size: 13px;
+}
+.cp-comment-header {
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.cp-comment-body {
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.cp-comment-footer {
+  display: flex;
+  gap: 6px;
+}
+.cp-comment-footer button {
+  padding: 2px 8px;
+  font-size: 12px;
+  background: var(--background-modifier-border);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-normal);
+}
+.cp-comment-footer button:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* 持久参考线 */
+.cp-guide-persistent line {
+  opacity: 0.5;
+}
+
 .cp-menu-submenu {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
