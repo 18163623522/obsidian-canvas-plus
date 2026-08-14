@@ -93,36 +93,38 @@ export function setupContextMenu(plugin: Plugin): () => void {
     const canvas = (leaves[0] as any).view?.canvas;
     const view = (leaves[0] as any).view;
     const containerEl = view?.containerEl as HTMLElement | undefined;
-    if (!containerEl || handlers.has(containerEl)) return;
 
     // ── 方案 A：patch canvas.menu.render（和 advanced-canvas 同源）──
-    // 白板菜单不通过 DOM 事件创建，而是直接调 canvas.menu.render()
-    // 事件监听（contextmenu/mousedown）在这个环境被其他插件拦截，收不到
-    // patch render 是 100% 可靠的触发点
-    try {
-      const menuObj = canvas?.menu;
-      const proto = menuObj?.constructor?.prototype;
-      if (proto && typeof proto.render === "function") {
-        const originalRender = proto.render;
-        proto.render = function (this: any, ...args: any[]) {
-          const result = originalRender.apply(this, args);
-          // render 后追加我们的菜单项
-          try {
-            diagnoseMenuFound = true;
-            appendToNativeMenu(this.canvas, plugin);
-          } catch (e) {
-            console.error("[cp-menu] render 后追加失败", e);
-          }
-          return result;
-        };
-        cleanups.push(() => { try { proto.render = originalRender; } catch {} });
-        console.log("[cp-menu] 已 patch canvas.menu.render");
+    // 每次 attach 都检查（因为 Obsidian 可能重建视图，新 canvas.menu 需要重新 patch）
+    // 用 renderPatched 防止对同一个 canvas 重复 patch
+    if (canvas && canvas.__cpRenderPatched !== true) {
+      try {
+        const menuObj = canvas?.menu;
+        const proto = menuObj?.constructor?.prototype;
+        if (proto && typeof proto.render === "function") {
+          const originalRender = proto.render;
+          proto.render = function (this: any, ...args: any[]) {
+            const result = originalRender.apply(this, args);
+            try {
+              diagnoseMenuFound = true;
+              appendToNativeMenu(this.canvas, plugin);
+            } catch (e) {
+              console.error("[cp-menu] render 后追加失败", e);
+            }
+            return result;
+          };
+          cleanups.push(() => { try { proto.render = originalRender; } catch {} });
+          canvas.__cpRenderPatched = true;
+          console.log("[cp-menu] 已 patch canvas.menu.render");
+        }
+      } catch (e) {
+        console.warn("[cp-menu] patch canvas.menu.render 失败", e);
       }
-    } catch (e) {
-      console.warn("[cp-menu] patch canvas.menu.render 失败", e);
     }
 
     // ── 方案 B：document 级 mousedown（诊断 + 兜底弹菜单）──
+    if (!containerEl || handlers.has(containerEl)) return;
+
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 2) return;
       const target = e.target as HTMLElement;
