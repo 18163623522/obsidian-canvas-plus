@@ -111,7 +111,12 @@ export function setEdgeWeight(edge: any, weight: number | undefined): void {
  * 和正文 text 真正分离。
  */
 function injectTitleBar(node: any, nodeEl: HTMLElement, data: any): void {
-  let bar = nodeEl.querySelector(":scope > .cp-title-bar") as HTMLElement | null;
+  // 注意：bar 在 container 内部（不是 nodeEl 直接子元素），必须用后代查询
+  // （之前用 :scope > 查不到，导致每 200ms 轮询重复注入一个标题栏）
+  const bars = nodeEl.querySelectorAll(".cp-title-bar");
+  let bar = (bars[0] as HTMLElement) ?? null;
+  // 清理历史堆积的多余标题栏（保留第一个）
+  for (let i = 1; i < bars.length; i++) bars[i].remove();
   const title: string = data[FLAG_TITLE] ?? "";
 
   if (!bar) {
