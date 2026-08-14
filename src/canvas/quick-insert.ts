@@ -7,6 +7,7 @@
 import { App, TFile, Notice, FuzzySuggestModal } from "obsidian";
 import type { Canvas } from "../types/canvas-internal";
 import { createTextViaData, createFileViaData, createLinkViaData } from "./canvas-access";
+import { setTextScale, setSticky, setShape } from "./node-styles";
 
 /** 在视口中心创建节点 */
 function center(canvas: Canvas): { x: number; y: number } {
@@ -71,26 +72,53 @@ export function insertCodeNode(canvas: Canvas): void {
 }
 
 // ============================================================
-//  文件节点（图片/PDF/视频/任意 vault 文件）
+//  文件节点（图片/PDF/视频/任意 vault 文件）+ 标题/气泡文字
 // ============================================================
+
+/** 选择器里的条目：文件 或 虚拟文字项 */
+type PickerItem =
+  | { kind: "file"; file: TFile }
+  | { kind: "title" }
+  | { kind: "bubble" };
+
 export async function insertFileNode(canvas: Canvas, app: App): Promise<void> {
   const files = app.vault.getFiles().filter((f) =>
     /\.(png|jpe?g|gif|svg|webp|bmp|pdf|mp4|webm|mp3|wav|ogg)$/i.test(f.path)
   );
-  if (files.length === 0) {
-    new Notice("Vault 里没有图片/PDF/视频/音频文件");
-    return;
-  }
+  // 文件可以为空（只显示文字选项）；但一个都没有时给提示也行，这里仍打开选择器
   const chosen = await new FilePickerModal(app, files).pick();
   if (!chosen) return;
+
   const c = center(canvas);
-  createFileViaData(canvas, {
-    x: c.x - 200,
-    y: c.y - 150,
-    file: chosen.path,
-  });
-  reveal(canvas, `文件节点 ${chosen.name}`);
-  new Notice(`已添加 ${chosen.name}`);
+
+  if (chosen.kind === "file") {
+    createFileViaData(canvas, {
+      x: c.x - 200,
+      y: c.y - 150,
+      file: chosen.file.path,
+    });
+    reveal(canvas, `文件节点 ${chosen.file.name}`);
+    new Notice(`已添加 ${chosen.file.name}`);
+    return;
+  }
+
+  if (chosen.kind === "title") {
+    const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 35, text: "# 标题", width: 300, height: 70 });
+    const n = canvas.nodes.get(id);
+    if (n) setTextScale(n, 1.8);
+    reveal(canvas, "标题文字");
+    new Notice("已添加标题文字");
+    return;
+  }
+
+  if (chosen.kind === "bubble") {
+    const id = createTextViaData(canvas, { x: c.x - 90, y: c.y - 35, text: "", width: 180, height: 70 });
+    const n = canvas.nodes.get(id);
+    if (n) { setSticky(n, "yellow"); setShape(n, "rounded"); }
+    reveal(canvas, "气泡文字");
+    new Notice("已添加气泡文字");
+    return;
+  }
 }
 
 // ============================================================
@@ -108,34 +136,45 @@ export function insertUrlNode(canvas: Canvas, url: string): void {
 }
 
 // ============================================================
-//  文件选择器 Modal
+//  文件选择器 Modal（含标题/气泡文字虚拟项）
 // ============================================================
-class FilePickerModal extends FuzzySuggestModal<TFile> {
+class FilePickerModal extends FuzzySuggestModal<PickerItem> {
   private files: TFile[];
-  private resolve?: (f: TFile | null) => void;
+  private resolve?: (item: PickerItem | null) => void;
 
   constructor(app: App, files: TFile[]) {
     super(app);
     this.files = files;
-    this.setPlaceholder("选择图片/PDF/视频/音频...");
+    this.setPlaceholder("选择图片/PDF/视频/音频，或直接选标题/气泡文字...");
   }
 
-  pick(): Promise<TFile | null> {
+  pick(): Promise<PickerItem | null> {
     return new Promise((resolve) => {
       this.resolve = resolve;
       this.open();
     });
   }
 
-  getItems(): TFile[] {
-    return this.files;
+  getItems(): PickerItem[] {
+    // 虚拟文字项放最前面，方便直接选
+    const virtuals: PickerItem[] = [
+      { kind: "title" },
+      { kind: "bubble" },
+    ];
+    const fileItems: PickerItem[] = this.files.map((f) => ({ kind: "file", file: f }));
+    return [...virtuals, ...fileItems];
   }
-  getItemText(item: TFile): string {
-    return item.path;
+
+  getItemText(item: PickerItem): string {
+    if (item.kind === "title") return "📝 标题文字";
+    if (item.kind === "bubble") return "💬 气泡文字";
+    return item.file.path;
   }
-  onChooseItem(item: TFile): void {
+
+  onChooseItem(item: PickerItem): void {
     this.resolve?.(item);
   }
+
   onClose(): void {
     setTimeout(() => this.resolve?.(null), 0);
   }
