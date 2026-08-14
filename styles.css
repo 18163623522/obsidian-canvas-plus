@@ -5,13 +5,8 @@
  * 标记 <!--cp:size:NNN--> 所在块套对应字号
  * ============================================================ */
 
-/* Live Preview: 字号档位 */
-.cm-line.cp-size.cp-size-90  { font-size: 90%; }
-.cm-line.cp-size.cp-size-100 { font-size: 100%; }
-.cm-line.cp-size.cp-size-110 { font-size: 110%; }
-.cm-line.cp-size.cp-size-125 { font-size: 125%; }
-.cm-line.cp-size.cp-size-150 { font-size: 150%; }
-.cm-line.cp-size.cp-size-200 { font-size: 200%; }
+/* Live Preview: 字号现已无极调节（CM6 ViewPlugin 直接套 inline style），
+ * 不再需要固定的 cp-size-XX class 规则。保留空注释占位。 */
 
 /* ============================================================
  * 阶段 1B：斜杠菜单
@@ -409,4 +404,35 @@
   padding: 10px 16px;
   font-size: 14px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+}
+
+/* ============================================================
+ * 字号无极调节 Modal
+ * ============================================================ */
+.cp-fontsize-slider-wrap {
+  margin: 8px 0 16px;
+}
+.cp-fontsize-slider-wrap input[type="range"] {
+  cursor: pointer;
+}
+.cp-fontsize-preview {
+  padding: 16px;
+  margin: 8px 0;
+  background: var(--background-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  line-height: 1.6;
+  transition: font-size 0.1s ease;
+}
+.cp-fontsize-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 16px;
+}
+.cp-fontsize-presets button {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
 }

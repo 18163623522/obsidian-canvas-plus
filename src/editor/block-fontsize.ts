@@ -63,9 +63,12 @@ const viewPlugin = ViewPlugin.fromClass(
       const decos: Array<{ from: number; deco: Decoration }> = [];
       for (const [lineNo, pct] of sizes) {
         const line = view.state.doc.line(lineNo);
+        // 无极调节：用 inline style 而非固定 class，任意 pct 都生效
         decos.push({
           from: line.from,
-          deco: Decoration.line({ class: `cp-size cp-size-${pct}` }),
+          deco: Decoration.line({
+            attributes: { style: `font-size: ${pct}%` },
+          }),
         });
       }
       return Decoration.set(

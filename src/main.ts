@@ -4,7 +4,7 @@
  * 阶段 1A：自动布局 / Markdown↔Canvas 互转 / 批量节点操作
  * 阶段 1B：每块字号调整 + 快捷键（slash 菜单 / 高亮块 / 拖拽后续）
  */
-import { Plugin, Notice } from "obsidian";
+import { Plugin, Notice, Modal, Setting, Editor } from "obsidian";
 import type { Modifier } from "obsidian";
 import type { Canvas } from "./types/canvas-internal";
 import { getActiveCanvas, targetNodes, diagnoseCanvas } from "./canvas/canvas-access";
@@ -686,6 +686,19 @@ export default class CanvasPlusPlugin extends Plugin {
       hotkeys: [{ modifiers: ["Ctrl", "Alt"], key: "0" }],
     });
 
+    // 自定义字号（无极调节）：弹 Modal 用滑块/数字输入任意百分比
+    this.addCommand({
+      id: "fontsize-custom",
+      name: "字号：自定义（无极调节）",
+      editorCallback: (editor) => {
+        // 预填当前块的字号（若有标记）
+        const cur = getCurrentBlockFontSize(editor);
+        new FontSizeModal(this.app, cur, (pct) => {
+          setBlockFontSize(editor, pct);
+        }).open();
+      },
+    });
+
     // 布局快捷键：Obsidian 的 addCommand 不支持事后给命令加默认快捷键，
     // 但布局命令已注册（上方），用户可在 设置→快捷键 搜 "canvas plus" 自行绑定。
     // 这里通过 hotkeys 字段在新注册的"组合命令"上提供默认绑定，
@@ -774,4 +787,128 @@ export default class CanvasPlusPlugin extends Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
   }
+}
+
+// ============================================================
+//  字号无极调节 Modal（滑块 + 数字输入）
+// ============================================================
+
+/** 读取光标所在块当前的字号 pct（无标记返回 100） */
+function getCurrentBlockFontSize(editor: Editor): number {
+  const cursor = editor.getCursor("head");
+  // 往上找块起始行
+  let blockStart = cursor.line;
+  while (blockStart > 0) {
+    if (editor.getLine(blockStart - 1).trim() === "") break;
+    blockStart--;
+  }
+  // 检查块上方是否有标记
+  const markerLine = blockStart - 1;
+  if (markerLine >= 0) {
+    const m = editor.getLine(markerLine).match(/^<!--cp:size:(\d+)-->/);
+    if (m) return parseInt(m[1], 10);
+  }
+  return 100;
+}
+
+/** 字号选择 Modal：滑块（50–400%）+ 数字输入 + 预览 */
+class FontSizeModal extends Modal {
+  private pct: number;
+  private onSubmit: (pct: number) => void;
+  private previewEl: HTMLElement | null = null;
+
+  constructor(app: import("obsidian").App, currentPct: number, onSubmit: (pct: number) => void) {
+    super(app);
+    this.pct = currentPct;
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "自定义字号" });
+
+    // 数字输入
+    new Setting(contentEl)
+      .setName("百分比")
+      .setDesc("50% – 400%，任意值（无极调节）")
+      .addText((text) => {
+        text.setValue(String(this.pct)).onChange((v) => {
+          const n = parseInt(v, 10);
+          if (!isNaN(n) && n >= 50 && n <= 400) {
+            this.pct = n;
+            this.updateSlider();
+            this.updatePreview();
+          }
+        });
+        text.inputEl.type = "number";
+        text.inputEl.min = "50";
+        text.inputEl.max = "400";
+        text.inputEl.style.width = "80px";
+      });
+
+    // 滑块
+    const sliderContainer = contentEl.createDiv({ cls: "cp-fontsize-slider-wrap" });
+    const slider = sliderContainer.createEl("input", { type: "range" });
+    slider.min = "50";
+    slider.max = "400";
+    slider.step = "1";
+    slider.value = String(this.pct);
+    slider.style.width = "100%";
+    slider.addEventListener("input", () => {
+      this.pct = parseInt(slider.value, 10);
+      this.updateNumberInput();
+      this.updatePreview();
+    });
+
+    // 预览区
+    contentEl.createEl("h3", { text: "预览" });
+    this.previewEl = contentEl.createDiv({ cls: "cp-fontsize-preview" });
+    this.updatePreview();
+
+    // 快捷档位按钮
+    const presetRow = contentEl.createDiv({ cls: "cp-fontsize-presets" });
+    for (const p of [75, 90, 100, 110, 125, 150, 175, 200, 250, 300]) {
+      const btn = presetRow.createEl("button", { text: `${p}%` });
+      btn.addEventListener("click", () => {
+        this.pct = p;
+        this.updateSlider();
+        this.updateNumberInput();
+        this.updatePreview();
+      });
+    }
+
+    // 确认/取消
+    new Setting(contentEl)
+      .addButton((btn) =>
+        btn.setButtonText("应用").setCta().onClick(() => {
+          this.onSubmit(this.pct);
+          this.close();
+        })
+      )
+      .addButton((btn) => btn.setButtonText("取消").onClick(() => this.close()));
+  }
+
+  private updateSlider() {
+    const s = contentElOf(this).querySelector('input[type="range"]') as HTMLInputElement | null;
+    if (s) s.value = String(this.pct);
+  }
+  private updateNumberInput() {
+    const i = contentElOf(this).querySelector('input[type="number"]') as HTMLInputElement | null;
+    if (i) i.value = String(this.pct);
+  }
+  private updatePreview() {
+    if (this.previewEl) {
+      this.previewEl.style.fontSize = `${this.pct}%`;
+      this.previewEl.setText(`当前字号 ${this.pct}% — 这是一段预览文字，The quick brown fox.`);
+    }
+  }
+
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
+
+function contentElOf(modal: Modal): HTMLElement {
+  return (modal as any).contentEl;
 }
