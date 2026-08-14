@@ -27,6 +27,60 @@ const ICONS: Record<string, string> = {
 /** 保存右键位置（画布坐标），供插入节点使用 */
 let lastContextMenuPos: { x: number; y: number } = { x: 0, y: 0 };
 
+/**
+ * 常驻「+」浮动按钮（不依赖右键事件，100% 可靠）
+ *
+ * 在白板视图右下角放一个插入按钮，点击弹官方 Menu。
+ * 无论右键被哪个插件拦截、菜单是什么形态，这个按钮永远可用。
+ */
+export function setupQuickInsertButton(plugin: Plugin): () => void {
+  const placed = new Set<HTMLElement>();
+
+  const place = () => {
+    try {
+      const leaves = plugin.app.workspace.getLeavesOfType("canvas");
+      for (const leaf of leaves) {
+        const view: any = (leaf as any).view;
+        const containerEl: HTMLElement | undefined = view?.containerEl;
+        const canvas: any = view?.canvas;
+        if (!containerEl || !canvas || placed.has(containerEl)) continue;
+
+        const btn = document.createElement("div");
+        btn.className = "cp-quick-insert-btn";
+        btn.setAttribute("aria-label", "插入节点");
+        try {
+          const { setIcon } = require("obsidian") as any;
+          setIcon(btn, "plus");
+        } catch {
+          btn.textContent = "+";
+        }
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const c2 = view?.canvas;
+          if (!c2) return;
+          // 以视口中心为插入位置
+          const center = c2.posCenter?.() ?? { x: 0, y: 0 };
+          showInsertMenu(c2, center);
+        });
+        containerEl.appendChild(btn);
+        placed.add(containerEl);
+      }
+    } catch (e) {
+      console.warn("[cp-menu] 放置插入按钮失败", e);
+    }
+  };
+
+  plugin.app.workspace.onLayoutReady(place);
+  const ref = plugin.app.workspace.on("layout-change", place);
+
+  return () => {
+    plugin.app.workspace.offref(ref);
+    for (const el of placed) el.querySelector(".cp-quick-insert-btn")?.remove();
+    placed.clear();
+  };
+}
+
 export function setupContextMenu(plugin: Plugin): () => void {
   const handlers = new Map<HTMLElement, (e: MouseEvent) => void>();
 

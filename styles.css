@@ -595,3 +595,33 @@
 .cp-saved-swatch {
   border: 2px solid var(--background-modifier-border);
 }
+
+/* ============================================================
+ * 白板常驻「+」插入按钮（右下角，不依赖右键事件）
+ * ============================================================ */
+.cp-quick-insert-btn {
+  position: absolute;
+  right: 24px;
+  bottom: 88px;
+  z-index: 20;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--interactive-accent, #6366f1);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  opacity: 0.85;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.cp-quick-insert-btn:hover {
+  opacity: 1;
+  transform: scale(1.08);
+}
+.cp-quick-insert-btn svg {
+  width: 20px;
+  height: 20px;
+}
