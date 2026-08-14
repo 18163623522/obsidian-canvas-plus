@@ -61,7 +61,7 @@ export function setupQuickInsertButton(plugin: Plugin): () => void {
           if (!c2) return;
           // 以视口中心为插入位置
           const center = c2.posCenter?.() ?? { x: 0, y: 0 };
-          showInsertMenu(c2, center);
+          showInsertMenu(c2, center, e as MouseEvent);
         });
         containerEl.appendChild(btn);
         placed.add(containerEl);
@@ -94,9 +94,7 @@ export function setupContextMenu(plugin: Plugin): () => void {
     const onCtx = (e: MouseEvent) => {
       const canvas2 = (leaves[0] as any).view?.canvas;
       if (!canvas2) return;
-      // 记录右键位置（转换成画布坐标 + 屏幕坐标）
-      lastClientX = e.clientX;
-      lastClientY = e.clientY;
+      // 记录右键位置（转换成画布坐标）
       try {
         lastContextMenuPos = canvas2.posFromEvt?.(e) ?? canvas2.posFromClient?.({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 };
       } catch {
@@ -217,13 +215,13 @@ function addInsertButtonToPopupMenu(popupEl: HTMLElement, canvas: any): void {
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
     e.preventDefault();
-    showInsertMenu(canvas, lastContextMenuPos);
+    showInsertMenu(canvas, lastContextMenuPos, e as MouseEvent);
   });
   popupEl.appendChild(btn);
 }
 
 /** 弹出插入节点菜单（Obsidian 官方 Menu，任意位置可用） */
-function showInsertMenu(canvas: any, c: { x: number; y: number }): void {
+function showInsertMenu(canvas: any, c: { x: number; y: number }, anchorEvent?: MouseEvent): void {
   const menu = new Menu();
   const items: Array<{ label: string; fn: () => void }> = [
     {
@@ -288,12 +286,24 @@ function showInsertMenu(canvas: any, c: { x: number; y: number }): void {
   for (const it of items) {
     menu.addItem((mi) => mi.setTitle(it.label).onClick(() => { try { it.fn(); } catch (e) { console.error("[cp-menu] 插入失败", e); } }));
   }
-  menu.showAtMouseEvent(new MouseEvent("click", { clientX: lastClientX, clientY: lastClientY }));
+  // 定位：优先用真实点击事件的坐标；否则用白板视图中心的屏幕坐标
+  let clientX = 0;
+  let clientY = 0;
+  if (anchorEvent && (anchorEvent.clientX || anchorEvent.clientY)) {
+    clientX = anchorEvent.clientX;
+    clientY = anchorEvent.clientY;
+  } else {
+    try {
+      const containerEl: HTMLElement | undefined = (canvas as any).view?.containerEl;
+      const r = containerEl?.getBoundingClientRect?.();
+      if (r) {
+        clientX = r.left + r.width / 2;
+        clientY = r.top + Math.min(r.height / 2, 300);
+      }
+    } catch {}
+  }
+  menu.showAtMouseEvent(new MouseEvent("click", { clientX, clientY }));
 }
-
-/** 记录最近一次右键的屏幕坐标（菜单弹出位置用） */
-let lastClientX = 200;
-let lastClientY = 200;
 
 // ============================================================
 //  DOM 菜单项构造
