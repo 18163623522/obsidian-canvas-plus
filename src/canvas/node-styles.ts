@@ -173,13 +173,19 @@ function injectTitleBar(node: any, nodeEl: HTMLElement, data: any): void {
     host.insertBefore(bar, host.firstChild);
   }
 
-  // 更新标题文字（如果没在编辑）
+  // 更新标题文字（如果没在编辑 + 内容有变化才写入，避免 200ms 轮询抖动）
   if (document.activeElement !== bar) {
     const isPlaceholder = !title;
-    bar.textContent = isPlaceholder ? "点击输入标题…" : title;
-    bar.style.opacity = isPlaceholder ? "0.5" : "1";
-    // 占位样式用 CSS 类管理，不重复绑监听器（轮询每 200ms 跑一次）
-    bar.classList.toggle("cp-title-placeholder", isPlaceholder);
+    const targetText = isPlaceholder ? "点击输入标题…" : title;
+    // 只有文字真正变了才写 textContent（避免无谓的 DOM 抖动）
+    if (bar.textContent !== targetText) {
+      bar.textContent = targetText;
+    }
+    const targetOpacity = isPlaceholder ? "0.5" : "1";
+    if (bar.style.opacity !== targetOpacity) bar.style.opacity = targetOpacity;
+    // 占位样式用 CSS 类管理
+    const hasPlaceholder = bar.classList.contains("cp-title-placeholder");
+    if (hasPlaceholder !== isPlaceholder) bar.classList.toggle("cp-title-placeholder", isPlaceholder);
   }
 }
 
@@ -190,52 +196,71 @@ export function applyNodeStyle(node: CanvasNode): void {
   const nodeEl = (node as any).nodeEl as HTMLElement | undefined;
   if (!nodeEl || !document.contains(nodeEl)) return; // 节点 DOM 不存在（懒渲染），跳过
 
-  // 清除旧的 cp-* class（保留非 cp 的）
-  const classes = Array.from(nodeEl.classList).filter((c) => !c.startsWith("cp-"));
-  nodeEl.className = classes.join(" ");
+  // ── 无变化快速通道（关键！）──
+  // 计算目标 class 集合，和当前一致就完全跳过本轮 DOM 操作。
+  // 之前每 200ms 无条件重写 nodeEl.className，即使内容相同也触发
+  // attribute 写入，干扰 Obsidian 的响应式渲染（连接把手被反复重置，
+  // 导致"无法从节点拖出箭头"）。
+  const targetClasses = new Set<string>();
+  if (data[FLAG_STYLE] === "plain") targetClasses.add("cp-plain");
+  if (data[FLAG_STYLE] === "title-card") targetClasses.add("cp-title-card");
+  if (data[FLAG_SHAPE]) targetClasses.add(`cp-shape-${data[FLAG_SHAPE]}`);
+  if (data[FLAG_STICKY]) { targetClasses.add("cp-sticky"); targetClasses.add(`cp-sticky-${data[FLAG_STICKY]}`); }
+  const scale = data[FLAG_TEXT_SCALE];
+  if (scale) targetClasses.add(`cp-scale-${String(scale).replace(".", "-")}`);
 
-  // 纯文字
-  if (data[FLAG_STYLE] === "plain") nodeEl.classList.add("cp-plain");
-  // 标题卡片：直接 DOM 注入标题栏（inline style 确保一定看得见）
+  const currentCp = Array.from(nodeEl.classList).filter((c) => c.startsWith("cp-"));
+  const same =
+    currentCp.length === targetClasses.size &&
+    currentCp.every((c) => targetClasses.has(c));
+  if (same) {
+    // class 一致：只做幂等注入（标题栏内部也有变化检测），不写 className
+    if (data[FLAG_STYLE] === "title-card") injectTitleBar(node as any, nodeEl, data);
+    // 字号缩放的 DOM 层需要重设（Obsidian 重建内容 DOM 后丢失），保持轻量重设
+    if (scale) applyTextScaleDom(node, scale);
+    // 图层和图标也要保持（可能被 Obsidian 重建覆盖）
+    applyLayerStyle(node);
+    applyIcon(node);
+    return;
+  }
+
+  // ── 有变化：清旧 cp-* class，写入新集合 ──
+  const classes = Array.from(nodeEl.classList).filter((c) => !c.startsWith("cp-"));
+  for (const c of targetClasses) classes.push(c);
+  const newClassName = classes.join(" ");
+  if (nodeEl.className !== newClassName) nodeEl.className = newClassName;
+
+  // 标题卡片：DOM 注入标题栏 / 非标题卡片：清理残留
   if (data[FLAG_STYLE] === "title-card") {
-    nodeEl.classList.add("cp-title-card");
     injectTitleBar(node as any, nodeEl, data);
   } else {
-    // 非标题卡片：移除可能残留的标题栏（在 container 内或 nodeEl 直下）
     const staleBar = nodeEl.querySelector(".cp-title-bar");
     if (staleBar) staleBar.remove();
   }
-  // 形状
-  if (data[FLAG_SHAPE]) nodeEl.classList.add(`cp-shape-${data[FLAG_SHAPE]}`);
-  // 便签
-  if (data[FLAG_STICKY]) nodeEl.classList.add(`cp-sticky`, `cp-sticky-${data[FLAG_STICKY]}`);
-
-  // 字号缩放：contentEl 设了不够，要设到 markdown-preview-view（阅读视图渲染层）
-  const scale = data[FLAG_TEXT_SCALE];
-  if (scale) {
-    nodeEl.classList.add(`cp-scale-${String(scale).replace(".", "-")}`);
-    const setFontSize = () => {
-      const ce = (node as any).contentEl as HTMLElement | undefined;
-      if (!ce) return;
-      // 阅读视图渲染层：markdown-preview-view 不继承父级 font-size
-      const targets = ce.querySelectorAll(".markdown-preview-view, .markdown-preview-sizer, .markdown-embed-content");
-      targets.forEach((t: any) => {
-        t.style.setProperty("font-size", `${scale}em`, "important");
-      });
-      // 编辑态 CM6
-      const cmContent = (node as any).child?.editMode?.cm?.dom?.querySelector?.(".cm-content") as HTMLElement | undefined;
-      if (cmContent) cmContent.style.setProperty("font-size", `${scale}em`, "important");
-    };
-    setFontSize();
-    setTimeout(setFontSize, 100);
-    setTimeout(setFontSize, 500);
-  }
+  if (scale) applyTextScaleDom(node, scale);
 
   // 图层样式（锁定/隐藏）
   applyLayerStyle(node);
 
   // 图标标记
   applyIcon(node);
+}
+
+/** 字号缩放的 DOM 应用（内容层 font-size） */
+function applyTextScaleDom(node: any, scale: number): void {
+  const setFontSize = () => {
+    const ce = node.contentEl as HTMLElement | undefined;
+    if (!ce) return;
+    const targets = ce.querySelectorAll(".markdown-preview-view, .markdown-preview-sizer, .markdown-embed-content");
+    targets.forEach((t: any) => {
+      if (t.style.getPropertyValue("font-size") !== `${scale}em`) {
+        t.style.setProperty("font-size", `${scale}em`, "important");
+      }
+    });
+    const cmContent = node.child?.editMode?.cm?.dom?.querySelector?.(".cm-content") as HTMLElement | undefined;
+    if (cmContent) cmContent.style.setProperty("font-size", `${scale}em`, "important");
+  };
+  setFontSize();
 }
 
 // ============== 便捷 setter ==============
