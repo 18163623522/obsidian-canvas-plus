@@ -90,16 +90,19 @@ export function setupContextMenu(plugin: Plugin): () => void {
     const leaves = plugin.app.workspace.getLeavesOfType("canvas");
     if (!leaves.length) return;
     const canvas = (leaves[0] as any).view?.canvas;
-    const wrapper = canvas?.wrapperEl as HTMLElement | undefined;
-    if (!wrapper || handlers.has(wrapper)) return;
+    const view = (leaves[0] as any).view;
+    const containerEl = view?.containerEl as HTMLElement | undefined;
+    if (!containerEl || handlers.has(containerEl)) return;
 
-    // 用 mousedown 替代 contextmenu（后者被其他插件在 capture 阶段拦截了）
-    // mousedown 也会在右键时触发（e.button === 2），且没人拦
+    // 在 document 上全局监听 mousedown（wrapperEl 可能不是右键事件的目标）
+    // 检测右键 + 事件目标在白板视图内
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 2) return; // 只处理右键
-      // 排除编辑区/标题栏/工具条内的右键（那些不弹插入菜单）
+      // 排除编辑区/标题栏/工具条/按钮内的右键
       const target = e.target as HTMLElement;
-      if (target?.closest?.(".cm-content, textarea, input, .cp-title-bar, .cp-floating-toolbar, .cp-quick-insert-btn")) return;
+      if (target?.closest?.(".cm-content, textarea, input, .cp-title-bar, .cp-floating-toolbar, .cp-quick-insert-btn, .menu, .canvas-popup-menu")) return;
+      // 必须在白板视图容器内
+      if (!containerEl.contains(target)) return;
 
       const canvas2 = (leaves[0] as any).view?.canvas;
       if (!canvas2) return;
@@ -112,12 +115,12 @@ export function setupContextMenu(plugin: Plugin): () => void {
         lastContextMenuPos = canvas2.pointer ?? { x: 0, y: 0 };
       }
 
-      // 先尝试追加到原生菜单（给它 150ms 渲染）
+      // 先尝试追加到原生菜单（给它多次重试机会）
       setTimeout(() => appendToNativeMenu(canvas2, plugin), 150);
     };
-    // mousedown 用 capture 阶段，抢在其他插件之前
-    wrapper.addEventListener("mousedown", onMouseDown, true);
-    handlers.set(wrapper, onMouseDown);
+    // document 级监听，capture 阶段，一定收得到
+    document.addEventListener("mousedown", onMouseDown, true);
+    handlers.set(containerEl, onMouseDown);
   };
 
   plugin.app.workspace.onLayoutReady(attach);
@@ -125,7 +128,7 @@ export function setupContextMenu(plugin: Plugin): () => void {
 
   return () => {
     plugin.app.workspace.offref(layoutRef);
-    for (const [el, fn] of handlers) el.removeEventListener("mousedown", fn, true);
+    for (const [, fn] of handlers) document.removeEventListener("mousedown", fn, true);
     handlers.clear();
   };
 }
