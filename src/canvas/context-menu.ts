@@ -85,6 +85,7 @@ export function setupQuickInsertButton(plugin: Plugin): () => void {
 
 export function setupContextMenu(plugin: Plugin): () => void {
   const handlers = new Map<HTMLElement, (e: MouseEvent) => void>();
+  const cleanups: Array<() => void> = [];
 
   const attach = () => {
     const leaves = plugin.app.workspace.getLeavesOfType("canvas");
@@ -94,31 +95,58 @@ export function setupContextMenu(plugin: Plugin): () => void {
     const containerEl = view?.containerEl as HTMLElement | undefined;
     if (!containerEl || handlers.has(containerEl)) return;
 
-    // 在 document 上全局监听 mousedown（wrapperEl 可能不是右键事件的目标）
-    // 检测右键 + 事件目标在白板视图内
+    // ── 方案 A：patch canvas.menu.render（和 advanced-canvas 同源）──
+    // 白板菜单不通过 DOM 事件创建，而是直接调 canvas.menu.render()
+    // 事件监听（contextmenu/mousedown）在这个环境被其他插件拦截，收不到
+    // patch render 是 100% 可靠的触发点
+    try {
+      const menuObj = canvas?.menu;
+      const proto = menuObj?.constructor?.prototype;
+      if (proto && typeof proto.render === "function") {
+        const originalRender = proto.render;
+        proto.render = function (this: any, ...args: any[]) {
+          const result = originalRender.apply(this, args);
+          // render 后追加我们的菜单项
+          try {
+            diagnoseMenuFound = true;
+            appendToNativeMenu(this.canvas, plugin);
+          } catch (e) {
+            console.error("[cp-menu] render 后追加失败", e);
+          }
+          return result;
+        };
+        cleanups.push(() => { try { proto.render = originalRender; } catch {} });
+        console.log("[cp-menu] 已 patch canvas.menu.render");
+      }
+    } catch (e) {
+      console.warn("[cp-menu] patch canvas.menu.render 失败", e);
+    }
+
+    // ── 方案 B：document 级 mousedown（诊断 + 兜底弹菜单）──
     const onMouseDown = (e: MouseEvent) => {
-      if (e.button !== 2) return; // 只处理右键
-      // 排除编辑区/标题栏/工具条/按钮内的右键
+      if (e.button !== 2) return;
       const target = e.target as HTMLElement;
       if (target?.closest?.(".cm-content, textarea, input, .cp-title-bar, .cp-floating-toolbar, .cp-quick-insert-btn, .menu, .canvas-popup-menu")) return;
-      // 必须在白板视图容器内
       if (!containerEl.contains(target)) return;
 
       const canvas2 = (leaves[0] as any).view?.canvas;
       if (!canvas2) return;
       diagnoseEventFired = true;
 
-      // 记录右键位置（转换成画布坐标）
       try {
         lastContextMenuPos = canvas2.posFromEvt?.(e) ?? canvas2.posFromClient?.({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 };
       } catch {
         lastContextMenuPos = canvas2.pointer ?? { x: 0, y: 0 };
       }
 
-      // 先尝试追加到原生菜单（给它多次重试机会）
-      setTimeout(() => appendToNativeMenu(canvas2, plugin), 150);
+      // 兜底：如果 patch render 没工作（极端情况），2 秒后强制弹菜单
+      setTimeout(() => {
+        if (!diagnoseMenuFound) {
+          console.debug("[cp-menu] patch render 未触发，强制弹菜单兜底");
+          showInsertMenu(canvas2, lastContextMenuPos);
+        }
+      }, 2000);
     };
-    // document 级监听，capture 阶段，一定收得到
     document.addEventListener("mousedown", onMouseDown, true);
     handlers.set(containerEl, onMouseDown);
   };
@@ -130,6 +158,7 @@ export function setupContextMenu(plugin: Plugin): () => void {
     plugin.app.workspace.offref(layoutRef);
     for (const [, fn] of handlers) document.removeEventListener("mousedown", fn, true);
     handlers.clear();
+    for (const c of cleanups) c();
   };
 }
 
