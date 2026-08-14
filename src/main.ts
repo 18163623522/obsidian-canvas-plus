@@ -133,7 +133,7 @@ export default class CanvasPlusPlugin extends Plugin {
     // 1. 选中变化监听（monkey-patch，派发自定义事件）
     this.uninstallSelectionPatch = patchCanvasSelection(this);
     // 2. 浮动工具条（选中节点时弹出）
-    this.toolbar = new FloatingToolbar(this.app);
+    this.toolbar = new FloatingToolbar(this.app, this);
     this.registerEvent(
       this.app.workspace.on(SELECTION_CHANGED_EVENT as any, (canvas: any) => {
         this.toolbar.onSelectionChanged(canvas);

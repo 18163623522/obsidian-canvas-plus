@@ -188,6 +188,52 @@ export function setTextScale(node: CanvasNode, scale: number | undefined): void 
   setFlag(node, FLAG_TEXT_SCALE, scale);
 }
 
+// ============== 样式模版 ==============
+
+export interface StyleTemplateData {
+  name: string;
+  color?: string;
+  cpTextScale?: number;
+  cpStyle?: string;
+  cpShape?: string;
+  cpSticky?: string;
+}
+
+/** 从节点的当前样式提取模版数据（不含 name） */
+export function extractNodeStyle(node: CanvasNode): Omit<StyleTemplateData, "name"> {
+  const data = node.getData?.() ?? (node as any).nodeData;
+  const tpl: Omit<StyleTemplateData, "name"> = {};
+  if (data.color) tpl.color = data.color;
+  if (data[FLAG_TEXT_SCALE] != null) tpl.cpTextScale = data[FLAG_TEXT_SCALE];
+  if (data[FLAG_STYLE]) tpl.cpStyle = data[FLAG_STYLE];
+  if (data[FLAG_SHAPE]) tpl.cpShape = data[FLAG_SHAPE];
+  if (data[FLAG_STICKY]) tpl.cpSticky = data[FLAG_STICKY];
+  return tpl;
+}
+
+/** 把模版应用到节点（覆盖该节点的样式标记） */
+export function applyTemplateToNode(node: CanvasNode, tpl: StyleTemplateData): void {
+  const data = node.getData();
+  const newData: any = { ...data };
+  // 清掉所有 cp* 标记，再用模版重设
+  delete newData[FLAG_STYLE];
+  delete newData[FLAG_SHAPE];
+  delete newData[FLAG_STICKY];
+  delete newData[FLAG_TEXT_SCALE];
+  // 应用模版
+  if (tpl.color) newData.color = tpl.color;
+  else delete newData.color;
+  if (tpl.cpStyle) newData[FLAG_STYLE] = tpl.cpStyle;
+  if (tpl.cpShape) newData[FLAG_SHAPE] = tpl.cpShape;
+  if (tpl.cpSticky) newData[FLAG_STICKY] = tpl.cpSticky;
+  if (tpl.cpTextScale != null) newData[FLAG_TEXT_SCALE] = tpl.cpTextScale;
+  (node as any).setData?.(newData);
+  node.canvas?.requestSave?.();
+  applyNodeStyle(node);
+  setTimeout(() => applyNodeStyle(node), 50);
+  setTimeout(() => applyNodeStyle(node), 200);
+}
+
 // ============== 节点创建便捷函数 ==============
 /** 创建纯文字节点 */
 export function createPlainTextNode(canvas: Canvas, opts: {

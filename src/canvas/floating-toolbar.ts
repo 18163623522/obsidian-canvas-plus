@@ -28,10 +28,12 @@ const TOOLBAR_ID = "cp-floating-toolbar";
 export class FloatingToolbar {
   private el: HTMLElement | null = null;
   private app: App;
+  private plugin: any;
   private currentCanvas: any = null;
 
-  constructor(app: App) {
+  constructor(app: App, plugin?: any) {
     this.app = app;
+    this.plugin = plugin;
   }
 
   /** 由 selection-changed 事件调用 */
@@ -90,7 +92,18 @@ export class FloatingToolbar {
     return el;
   }
 
-  private show(nodes: CanvasNode[]): void {
+  /** 根据样式属性猜一个默认模版名 */
+  private guessTemplateName(style: any): string {
+    const parts: string[] = [];
+    if (style.cpSticky) parts.push(style.cpSticky + "便签");
+    if (style.cpShape) parts.push(style.cpShape);
+    if (style.cpTextScale) parts.push(Math.round(style.cpTextScale * 100) + "%");
+    if (style.cpStyle === "plain") parts.push("纯文字");
+    if (parts.length === 0) return "新模版";
+    return parts.join("·");
+  }
+
+  private async show(nodes: CanvasNode[]): Promise<void> {
     const el = this.ensureEl();
     el.empty();
     el.style.display = "flex";
@@ -148,18 +161,46 @@ export class FloatingToolbar {
       };
     }
 
-    // -- 字号 --
+    // -- 字号（无极滑块）--
     const sizeRow = makeGroup("字号");
-    for (const sz of [
-      { label: "A-", scale: 0.85, title: "缩小" },
-      { label: "A", scale: undefined, title: "标准" },
-      { label: "A+", scale: 1.2, title: "放大" },
-      { label: "A++", scale: 1.5, title: "更大" },
-    ]) {
-      btn(sizeRow, sz.label, sz.title, async () => {
-        const { setTextScale } = await import("./node-styles");
-        for (const n of nodes) setTextScale(n, sz.scale);
-      });
+    {
+      const { setTextScale } = await import("./node-styles");
+      // 读当前节点字号预填
+      let curScale = 1;
+      try {
+        const d = nodes[0]?.getData?.();
+        if (d?.cpTextScale != null) curScale = d.cpTextScale;
+      } catch {}
+      const wrap = sizeRow.createDiv({ cls: "cp-tb-fontsize-wrap" });
+      wrap.style.display = "flex";
+      wrap.style.alignItems = "center";
+      wrap.style.gap = "6px";
+      wrap.style.width = "100%";
+      const slider = wrap.createEl("input", { type: "range" });
+      slider.min = "0.5";
+      slider.max = "3";
+      slider.step = "0.05";
+      slider.value = String(curScale);
+      slider.style.flex = "1";
+      slider.style.cursor = "pointer";
+      const label = wrap.createEl("span", { text: `${Math.round(curScale * 100)}%` });
+      label.style.fontSize = "11px";
+      label.style.minWidth = "36px";
+      label.style.textAlign = "right";
+      // 重置按钮
+      const resetBtn = wrap.createEl("button", { cls: "cp-tb-btn", text: "1×" });
+      resetBtn.title = "标准字号";
+      resetBtn.style.fontSize = "11px";
+      resetBtn.onclick = () => {
+        slider.value = "1";
+        label.setText("100%");
+        for (const n of nodes) setTextScale(n, undefined);
+      };
+      slider.oninput = () => {
+        const s = parseFloat(slider.value);
+        label.setText(`${Math.round(s * 100)}%`);
+        for (const n of nodes) setTextScale(n, s);
+      };
     }
 
     // -- 样式 --
@@ -188,6 +229,43 @@ export class FloatingToolbar {
         for (const n of nodes) setShape(n, shape.value);
         this.hide();
       });
+    }
+
+    // -- 样式模版（存当前样式 / 应用已存模版）--
+    {
+      const { extractNodeStyle, applyTemplateToNode } = await import("./node-styles");
+      const tplRow = makeGroup("样式模版");
+
+      // 存为模版：读第一个节点的样式，弹输入框命名
+      const saveBtn = btn(tplRow, "★", "把当前节点样式存为模版", async () => {
+        if (!this.plugin) return;
+        const style = extractNodeStyle(nodes[0]);
+        const name = window.prompt("给这个样式模版起个名字：", this.guessTemplateName(style));
+        if (!name) return;
+        this.plugin.settings.styleTemplates = this.plugin.settings.styleTemplates || [];
+        this.plugin.settings.styleTemplates.push({ name, ...style });
+        await this.plugin.saveSettings();
+        new Notice(`已保存模版「${name}」`);
+      });
+      saveBtn.style.color = "var(--color-yellow)";
+
+      // 应用模版：下拉选择已存模版
+      const tpls: any[] = this.plugin?.settings?.styleTemplates || [];
+      if (tpls.length > 0) {
+        const select = tplRow.createEl("select", { cls: "cp-tb-tpl-select" });
+        select.style.maxWidth = "120px";
+        select.style.fontSize = "12px";
+        select.createEl("option", { text: "应用模版…", value: "" });
+        for (let i = 0; i < tpls.length; i++) {
+          select.createEl("option", { text: tpls[i].name, value: String(i) });
+        }
+        select.onchange = async () => {
+          const idx = parseInt(select.value, 10);
+          if (isNaN(idx)) return;
+          for (const n of nodes) applyTemplateToNode(n, tpls[idx]);
+          select.value = "";
+        };
+      }
     }
 
     // -- 对齐（多选时才有意义） --

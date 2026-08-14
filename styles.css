@@ -487,3 +487,20 @@
   border: none;
   padding: 0;
 }
+
+/* ============================================================
+ * 白板浮动工具条：字号滑块 + 模版下拉
+ * ============================================================ */
+.cp-tb-fontsize-wrap {
+  padding: 2px 0;
+}
+.cp-tb-fontsize-wrap input[type="range"] {
+  height: 4px;
+}
+.cp-tb-tpl-select {
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-normal);
+  cursor: pointer;
+}

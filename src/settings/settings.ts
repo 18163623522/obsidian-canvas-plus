@@ -19,6 +19,24 @@ export interface CanvasPlusSettings {
   bulkLimit: number;
   /** 智能吸附辅助线开关 */
   smartSnap: boolean;
+  /** 节点样式模版（颜色 + 字号 + 形状等完整样式） */
+  styleTemplates: StyleTemplate[];
+}
+
+/** 节点样式模版：保存一组 cp* 标记 + 原生 color，可一键应用 */
+export interface StyleTemplate {
+  /** 模版名（用户起的） */
+  name: string;
+  /** 原生颜色（"1"-"6" 或 "#hex"） */
+  color?: string;
+  /** 字号缩放（如 1.2） */
+  cpTextScale?: number;
+  /** 纯文字标记 */
+  cpStyle?: string;
+  /** 形状 */
+  cpShape?: string;
+  /** 便签颜色 */
+  cpSticky?: string;
 }
 
 export const DEFAULT_SETTINGS: CanvasPlusSettings = {
@@ -29,6 +47,7 @@ export const DEFAULT_SETTINGS: CanvasPlusSettings = {
   bulkLinkEdges: true,
   bulkLimit: 100,
   smartSnap: false,
+  styleTemplates: [],
 };
 
 export class CanvasPlusSettingTab extends PluginSettingTab {
@@ -166,5 +185,51 @@ export class CanvasPlusSettingTab extends PluginSettingTab {
           (this.app as any).commands?.executeCommandById?.("setting:open-hotkeys");
         });
       });
+
+    // —— 样式模版管理 ——
+    containerEl.createEl("h3", { text: "样式模版" });
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text: "在白板里选中节点，用浮动工具条的「存为模版」保存样式。这里可查看和删除已保存的模版。",
+    });
+
+    this.renderTemplates();
+  }
+
+  /** 渲染模版列表（含删除按钮） */
+  private renderTemplates(): void {
+    const { containerEl } = this;
+    const tpls = this.plugin.settings.styleTemplates || [];
+
+    if (tpls.length === 0) {
+      containerEl.createEl("p", {
+        text: "（暂无模版。在白板里选中节点 → 浮动工具条 → 「存为模版」即可创建。）",
+        cls: "setting-item-description",
+      });
+      return;
+    }
+
+    for (let i = 0; i < tpls.length; i++) {
+      const tpl = tpls[i];
+      const parts: string[] = [];
+      if (tpl.color) parts.push(`颜色 ${tpl.color}`);
+      if (tpl.cpTextScale) parts.push(`字号 ${tpl.cpTextScale}×`);
+      if (tpl.cpShape) parts.push(`形状 ${tpl.cpShape}`);
+      if (tpl.cpSticky) parts.push(`便签 ${tpl.cpSticky}`);
+      if (tpl.cpStyle) parts.push(`纯文字`);
+
+      new Setting(containerEl)
+        .setName(tpl.name)
+        .setDesc(parts.join(" · ") || "（空模版）")
+        .addExtraButton((btn) => {
+          btn.setIcon("trash")
+            .setTooltip("删除")
+            .onClick(async () => {
+              this.plugin.settings.styleTemplates.splice(i, 1);
+              await this.plugin.saveSettings();
+              this.display();
+            });
+        });
+    }
   }
 }
