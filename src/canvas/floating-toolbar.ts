@@ -159,6 +159,62 @@ export class FloatingToolbar {
           try { (n as any).setColor?.(picker.value); } catch (e) { console.error(e); }
         }
       };
+
+      // "+" 存颜色按钮：把选中节点的当前颜色存成快捷色块
+      const saveColorBtn = colorRow.createEl("button", {
+        cls: "cp-color-btn cp-color-save-btn",
+        attr: { title: "保存当前颜色为快捷色块", "aria-label": "保存颜色" },
+      });
+      saveColorBtn.textContent = "+";
+      saveColorBtn.style.fontWeight = "700";
+      saveColorBtn.style.fontSize = "16px";
+      saveColorBtn.onclick = async () => {
+        if (!this.plugin) return;
+        const curColor = nodes[0]?.getData?.()?.color;
+        if (!curColor) {
+          new Notice("请先给节点选个颜色再保存");
+          return;
+        }
+        // 索引颜色转 hex（便于色块显示）
+        let hex = curColor;
+        if (!curColor.startsWith("#")) {
+          hex = (COLORS as any)[curColor]?.bg ?? curColor;
+        }
+        const saved: string[] = this.plugin.settings.savedColors || [];
+        if (!saved.includes(hex)) {
+          saved.push(hex);
+          this.plugin.settings.savedColors = saved;
+          await this.plugin.saveSettings();
+          new Notice(`颜色 ${hex} 已保存`);
+          // 刷新工具条显示新色块
+          this.onSelectionChanged(this.currentCanvas);
+        } else {
+          new Notice("这个颜色已经保存过了");
+        }
+      };
+
+      // 已保存的快捷颜色色块（点击应用，右键删除）
+      const savedColors: string[] = this.plugin?.settings?.savedColors || [];
+      for (const hex of savedColors) {
+        const sb = colorRow.createEl("button", {
+          cls: "cp-color-btn cp-saved-swatch",
+          attr: { title: `${hex}（左键应用 / 右键删除）`, "aria-label": hex },
+        });
+        sb.style.background = hex;
+        sb.onclick = () => {
+          for (const n of nodes) {
+            try { (n as any).setColor?.(hex); } catch (e) { console.error(e); }
+          }
+        };
+        sb.addEventListener("contextmenu", async (e) => {
+          e.preventDefault();
+          if (!this.plugin) return;
+          this.plugin.settings.savedColors = (this.plugin.settings.savedColors || []).filter((c: string) => c !== hex);
+          await this.plugin.saveSettings();
+          new Notice(`已删除颜色 ${hex}`);
+          this.onSelectionChanged(this.currentCanvas);
+        });
+      }
     }
 
     // -- 字号（无极滑块）--

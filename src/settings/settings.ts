@@ -21,6 +21,8 @@ export interface CanvasPlusSettings {
   smartSnap: boolean;
   /** 节点样式模版（颜色 + 字号 + 形状等完整样式） */
   styleTemplates: StyleTemplate[];
+  /** 用户保存的快捷颜色（hex 数组，只存颜色不含其他样式） */
+  savedColors: string[];
 }
 
 /** 节点样式模版：保存一组 cp* 标记 + 原生 color，可一键应用 */
@@ -48,6 +50,7 @@ export const DEFAULT_SETTINGS: CanvasPlusSettings = {
   bulkLimit: 100,
   smartSnap: false,
   styleTemplates: [],
+  savedColors: [],
 };
 
 export class CanvasPlusSettingTab extends PluginSettingTab {
@@ -194,6 +197,14 @@ export class CanvasPlusSettingTab extends PluginSettingTab {
     });
 
     this.renderTemplates();
+
+    // —— 快捷颜色管理 ——
+    containerEl.createEl("h3", { text: "快捷颜色" });
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text: "在白板浮动工具条的颜色组里点「+」保存常用颜色，这里可查看和删除。",
+    });
+    this.renderSavedColors();
   }
 
   /** 渲染模版列表（含删除按钮） */
@@ -230,6 +241,36 @@ export class CanvasPlusSettingTab extends PluginSettingTab {
               this.display();
             });
         });
+    }
+  }
+
+  /** 渲染快捷颜色列表（色块 + 删除） */
+  private renderSavedColors(): void {
+    const { containerEl } = this;
+    const colors = this.plugin.settings.savedColors || [];
+
+    if (colors.length === 0) {
+      containerEl.createEl("p", {
+        text: "（暂无。在白板工具条颜色组里点「+」即可保存当前颜色。）",
+        cls: "setting-item-description",
+      });
+      return;
+    }
+
+    const row = containerEl.createDiv({ cls: "cp-saved-colors-row" });
+    for (let i = 0; i < colors.length; i++) {
+      const hex = colors[i];
+      const wrap = row.createDiv({ cls: "cp-saved-color-item" });
+      const swatch = wrap.createDiv({ cls: "cp-saved-color-swatch" });
+      swatch.style.background = hex;
+      swatch.title = `${hex}（点击删除）`;
+      const label = wrap.createEl("span", { text: hex, cls: "cp-saved-color-label" });
+      // 点击删除
+      wrap.addEventListener("click", async () => {
+        this.plugin.settings.savedColors.splice(i, 1);
+        await this.plugin.saveSettings();
+        this.display();
+      });
     }
   }
 }

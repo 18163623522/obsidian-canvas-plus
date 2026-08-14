@@ -504,3 +504,45 @@
   color: var(--text-normal);
   cursor: pointer;
 }
+
+/* ============================================================
+ * 设置页：快捷颜色管理 + 工具条存颜色按钮
+ * ============================================================ */
+.cp-saved-colors-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+.cp-saved-color-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.cp-saved-color-swatch {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  transition: transform 0.1s;
+}
+.cp-saved-color-item:hover .cp-saved-color-swatch {
+  transform: scale(1.08);
+}
+.cp-saved-color-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+}
+
+/* 工具条里的存颜色 + 按钮 */
+.cp-color-save-btn {
+  font-weight: 700;
+}
+/* 工具条里已保存的色块（和原生色块同样式）*/
+.cp-saved-swatch {
+  border: 2px solid var(--background-modifier-border);
+}
