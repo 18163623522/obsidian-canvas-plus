@@ -56,7 +56,7 @@ import {
   createStopwatchNode,
   diagnoseTimers,
 } from "./canvas/timer-node";
-import { setupContextMenu, setupQuickInsertButton } from "./canvas/context-menu";
+import { setupContextMenu, setupQuickInsertButton, startContextMenuDiagnose } from "./canvas/context-menu";
 import { setupTabConnect } from "./canvas/tab-connect";
 import { searchInNode } from "./canvas/node-search";
 import { setupAltDuplicate } from "./canvas/alt-duplicate";
@@ -299,6 +299,12 @@ export default class CanvasPlusPlugin extends Plugin {
       });
     };
     insertCmd("insert-math", "插入：公式节点", (c) => insertMathNode(c));
+    // 诊断：排查右键菜单链路（15 秒窗口）
+    this.addCommand({
+      id: "diagnose-context-menu",
+      name: "诊断：右键菜单链路",
+      callback: () => startContextMenuDiagnose(this),
+    });
     insertCmd("insert-title", "插入：标题文字", async (c) => {
       const { createTextViaData } = await import("./canvas/canvas-access");
       const { setTitleCard } = await import("./canvas/node-styles");

@@ -5,7 +5,7 @@
  * 等原生菜单出现后，往它的 DOM 里追加我们的菜单项。
  * 子菜单用延时关闭，hover 顺畅。
  */
-import { Plugin, Menu } from "obsidian";
+import { Plugin, Menu, Notice } from "obsidian";
 import { createTextViaData } from "./canvas-access";
 import { setShape, setSticky, togglePlain, setEdgeStyle, setEdgeWeight, setTextScale, setTitleCard } from "./node-styles";
 import { expandOneDegree, expandTwoDegrees } from "./graph-expand";
@@ -94,6 +94,7 @@ export function setupContextMenu(plugin: Plugin): () => void {
     const onCtx = (e: MouseEvent) => {
       const canvas2 = (leaves[0] as any).view?.canvas;
       if (!canvas2) return;
+      diagnoseEventFired = true;
       // 记录右键位置（转换成画布坐标）
       try {
         lastContextMenuPos = canvas2.posFromEvt?.(e) ?? canvas2.posFromClient?.({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 };
@@ -117,14 +118,71 @@ export function setupContextMenu(plugin: Plugin): () => void {
   };
 }
 
+/** 诊断状态（诊断命令开启后收集右键链路各环节数据） */
+let diagnoseActive = false;
+let diagnoseEventFired = false;
+let diagnoseMenuFound = false;
+
+/**
+ * 诊断命令：开启 15 秒诊断窗口。
+ * 用户右键白板一次后，报告链路各环节状态：
+ *   ① 监听是否挂上 ② 事件是否触发 ③ 原生菜单是否出现 ④ 追加是否成功
+ */
+export function startContextMenuDiagnose(plugin: Plugin): void {
+  diagnoseActive = false;
+  diagnoseEventFired = false;
+  diagnoseMenuFound = false;
+
+  // ① 检查监听是否挂上
+  let attached = false;
+  let wrapperInfo = "无";
+  try {
+    const leaves = plugin.app.workspace.getLeavesOfType("canvas");
+    const canvas = (leaves[0] as any).view?.canvas;
+    const wrapper = canvas?.wrapperEl as HTMLElement | undefined;
+    attached = !!wrapper;
+    wrapperInfo = wrapper ? `${wrapper.className.slice(0, 40)}...` : "wrapperEl 不存在";
+  } catch {}
+
+  // 列出当前页面所有菜单类元素（右键前先记录基线）
+  const baseMenus = document.querySelectorAll(".menu, .canvas-popup-menu").length;
+
+  diagnoseActive = true;
+  new Notice(`诊断已开启（15 秒内右键白板一次）\n监听挂载: ${attached ? "✓" : "✗ " + wrapperInfo}`, 6000);
+
+  setTimeout(() => {
+    diagnoseActive = false;
+    const nowMenus = document.querySelectorAll(".menu, .canvas-popup-menu").length;
+    const parts = [
+      `① 监听挂载: ${attached ? "✓" : "✗（wrapperEl 拿不到）"}`,
+      `② 右键事件: ${diagnoseEventFired ? "✓" : "✗（未触发）"}`,
+      `③ 原生菜单: ${diagnoseMenuFound ? "✓ 已增强" : nowMenus > baseMenus ? "出现但未识别" : "✗ 未弹出"}`,
+    ];
+    new Notice(`右键诊断结果：\n${parts.join("\n")}\n（详情看控制台 [cp-menu] 日志）`, 10000);
+    console.log("[cp-menu] 诊断结果", { attached, eventFired: diagnoseEventFired, menuFound: diagnoseMenuFound, baseMenus, nowMenus });
+  }, 15000);
+}
+
 /** 找到原生菜单 DOM，往里追加我们的项（带重试：菜单可能渲染慢） */
 function appendToNativeMenu(canvas: any, plugin: Plugin, attempt = 0) {
   const DELAYS = [100, 200, 300, 500, 800];
   try {
     const ok = appendToNativeMenuInner(canvas, plugin);
-    if (!ok && attempt < DELAYS.length) {
+    if (ok) {
+      diagnoseMenuFound = true;
+      return;
+    }
+    if (attempt < DELAYS.length) {
       // 菜单还没渲染出来，稍后重试
       setTimeout(() => appendToNativeMenu(canvas, plugin, attempt + 1), DELAYS[attempt]);
+    } else {
+      // 重试用完（约 2 秒）还没有任何原生菜单 ——
+      // 说明这个环境的白板右键根本不弹菜单，直接弹我们的完整菜单兜底
+      console.debug("[cp-menu] 原生菜单未出现，直接弹插入菜单");
+      showInsertMenu(canvas, lastContextMenuPos);
+      if (diagnoseActive) {
+        new Notice("诊断：右键事件✓ 但原生菜单未弹出，已直接弹插入菜单", 8000);
+      }
     }
   } catch (e) {
     console.error("[cp-menu] 追加菜单项失败", e);
