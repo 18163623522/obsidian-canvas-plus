@@ -62,11 +62,7 @@ export function setupQuickInsertButton(plugin: Plugin): () => void {
           // 以视口中心为插入位置
           const center = c2.posCenter?.() ?? { x: 0, y: 0 };
           showInsertMenu(c2, center, e as MouseEvent);
-        });
-        // 右键「+」按钮 = 快速诊断（不用搜命令面板）
-        btn.addEventListener("contextmenu", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
+          // 同时启动诊断（左键触发，不依赖右键）
           startContextMenuDiagnose(plugin);
         });
         containerEl.appendChild(btn);
