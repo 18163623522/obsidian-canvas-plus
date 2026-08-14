@@ -216,6 +216,7 @@ function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
   }
 
   // ── fallback：标准 .menu ──
+  // 放宽：不要求 children.length>0（菜单可能还在渲染子项）
   const menus = Array.from(document.querySelectorAll(".menu")) as HTMLElement[];
   let menuEl: HTMLElement | null = null;
   for (const el of menus) {
@@ -226,17 +227,21 @@ function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
     break;
   }
   if (!menuEl) {
-    // 诊断模式：列出页面上所有菜单类元素，帮定位
+    // 诊断模式：列出页面上所有菜单类元素 + 白板交互层
     if (diagnoseActive) {
       const all = Array.from(document.querySelectorAll("[class*='menu'], [class*='popup'], [class*='context']")) as HTMLElement[];
-      const classes = all.slice(0, 10).map((el) => el.className.slice(0, 60));
-      console.log("[cp-menu] 页面上的菜单类元素:", classes);
+      const classes = all.slice(0, 10).map((el) => `${el.tagName}.${el.className.slice(0, 50)}`);
+      console.log("[cp-menu] 页面菜单类元素:", classes);
+      new Notice(`诊断：没找到 .menu/.canvas-popup-menu\n页面有 ${all.length} 个菜单类元素\n控制台看详情`, 8000);
     }
-    console.debug("[cp-menu] 没找到菜单 DOM");
     return false;
   }
   menuEl.classList.add("is-cp-added");
   console.debug("[cp-menu] 找到标准菜单，开始追加自定义项");
+
+  if (diagnoseActive) {
+    new Notice(`诊断：找到菜单 class=${diagnoseMenuClasses.join(",")}`, 8000);
+  }
 
   // 点击菜单项后关闭整个菜单
   const closeMenu = () => {
