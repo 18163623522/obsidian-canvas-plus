@@ -139,13 +139,14 @@ export function setupContextMenu(plugin: Plugin): () => void {
         lastContextMenuPos = canvas2.pointer ?? { x: 0, y: 0 };
       }
 
-      // 兜底：如果 patch render 没工作（极端情况），2 秒后强制弹菜单
+      // 兜底：1 秒后检查原生菜单里有没有我们的项，没有就强制弹我们的菜单
       setTimeout(() => {
-        if (!diagnoseMenuFound) {
-          console.debug("[cp-menu] patch render 未触发，强制弹菜单兜底");
+        const hasOurItems = document.querySelector(".cp-insert-btn, .menu.is-cp-added, .cp-submenu");
+        if (!hasOurItems) {
+          console.debug("[cp-menu] 原生菜单没有我们的项，强制弹菜单");
           showInsertMenu(canvas2, lastContextMenuPos);
         }
-      }, 2000);
+      }, 1000);
     };
     document.addEventListener("mousedown", onMouseDown, true);
     handlers.set(containerEl, onMouseDown);
