@@ -65,6 +65,14 @@ export function setupContextMenu(plugin: Plugin): () => void {
 
 /** 找到原生菜单 DOM，往里追加我们的项 */
 function appendToNativeMenu(canvas: any, plugin: Plugin) {
+  try {
+    appendToNativeMenuInner(canvas, plugin);
+  } catch (e) {
+    console.error("[cp-menu] 追加菜单项失败", e);
+  }
+}
+
+function appendToNativeMenuInner(canvas: any, plugin: Plugin) {
   const menus = Array.from(document.querySelectorAll(".menu"));
   let menuEl: HTMLElement | null = null;
   for (const m of menus) {
@@ -140,8 +148,8 @@ function appendBlankItems(menuEl: HTMLElement, canvas: any, c: { x: number; y: n
   const insertItem = createItem("插入节点", "plus", () => {}, true);
   const sub = createSubmenu(insertItem, [
     { label: "文本节点", onClick: () => { createTextViaData(canvas, { x: c.x - 125, y: c.y - 50, text: "", width: 250, height: 100 }); closeMenu(); } },
-    { label: "标题文字", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "正文内容", width: 300, height: 120 }); const n = canvas.nodes.get(id); setTitleCard(n); (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" }); closeMenu(); } },
-    { label: "气泡文字", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 90, y: c.y - 35, text: "", width: 180, height: 70 }); const n = canvas.nodes.get(id); setSticky(n, "yellow"); setShape(n, "rounded"); closeMenu(); } },
+    { label: "标题文字", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "正文内容", width: 300, height: 120 }); const n = canvas.nodes.get(id); if (n) { setTitleCard(n); (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" }); } closeMenu(); } },
+    { label: "气泡文字", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 90, y: c.y - 35, text: "", width: 180, height: 70 }); const n = canvas.nodes.get(id); if (n) { setSticky(n, "yellow"); setShape(n, "rounded"); } closeMenu(); } },
     { label: "纯文字（无边框）", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 125, y: c.y - 30, text: "", width: 250, height: 60 }); togglePlain(canvas.nodes.get(id)); closeMenu(); } },
     { label: "便签（黄）", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 100, y: c.y - 100, text: "", width: 200, height: 200 }); setSticky(canvas.nodes.get(id), "yellow"); closeMenu(); } },
     { label: "代码节点", onClick: () => { createTextViaData(canvas, { x: c.x - 175, y: c.y - 100, text: "```js\n\n```", width: 350, height: 200 }); closeMenu(); } },
@@ -165,8 +173,43 @@ function appendBlankItems(menuEl: HTMLElement, canvas: any, c: { x: number; y: n
   menuEl.appendChild(layoutItem);
 }
 
-/** 节点右键：样式 + 展开链接 + 分组 */
+/** 节点右键：快捷插入 + 样式 + 展开链接 + 分组 */
 function appendNodeItems(menuEl: HTMLElement, nodes: any[], closeMenu: () => void, canvas: any, plugin: Plugin) {
+  // 快捷插入文字（在选中节点旁边创建，方便给图片/视频配文字）
+  {
+    const refData = nodes[0]?.getData?.() ?? {};
+    const nx = refData.x ?? 0;
+    const ny = (refData.y ?? 0) + (refData.height ?? 100) + 60; // 节点下方
+    const insertItem = createItem("插入文字", "plus", () => {}, true);
+    createSubmenu(insertItem, [
+      { label: "标题文字（标题栏+正文）", onClick: () => {
+          const id = createTextViaData(canvas, { x: nx, y: ny, text: "正文内容", width: 300, height: 120 });
+          const n = canvas.nodes.get(id);
+          if (n) { setTitleCard(n); (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" }); }
+          closeMenu();
+        } },
+      { label: "气泡文字", onClick: () => {
+          const id = createTextViaData(canvas, { x: nx, y: ny, text: "", width: 180, height: 70 });
+          const n = canvas.nodes.get(id);
+          if (n) { setSticky(n, "yellow"); setShape(n, "rounded"); }
+          closeMenu();
+        } },
+      { label: "便签（黄）", onClick: () => {
+          const id = createTextViaData(canvas, { x: nx, y: ny, text: "", width: 200, height: 200 });
+          const n = canvas.nodes.get(id);
+          if (n) setSticky(n, "yellow");
+          closeMenu();
+        } },
+      { label: "纯文字（无边框）", onClick: () => {
+          const id = createTextViaData(canvas, { x: nx, y: ny, text: "", width: 250, height: 60 });
+          const n = canvas.nodes.get(id);
+          if (n) togglePlain(n);
+          closeMenu();
+        } },
+    ]);
+    menuEl.appendChild(insertItem);
+  }
+
   // 多选时显示"打包分组"
   if (nodes.length >= 2) {
     const groupItem = createItem("打包分组", "layout", () => { groupSelection(canvas); closeMenu(); });
