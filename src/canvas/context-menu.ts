@@ -140,7 +140,7 @@ function appendBlankItems(menuEl: HTMLElement, canvas: any, c: { x: number; y: n
   const insertItem = createItem("插入节点", "plus", () => {}, true);
   const sub = createSubmenu(insertItem, [
     { label: "文本节点", onClick: () => { createTextViaData(canvas, { x: c.x - 125, y: c.y - 50, text: "", width: 250, height: 100 }); closeMenu(); } },
-    { label: "标题文字", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "# 标题\n\n正文内容", width: 300, height: 120 }); const n = canvas.nodes.get(id); setTitleCard(n); closeMenu(); } },
+    { label: "标题文字", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "正文内容", width: 300, height: 120 }); const n = canvas.nodes.get(id); setTitleCard(n); (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" }); closeMenu(); } },
     { label: "气泡文字", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 90, y: c.y - 35, text: "", width: 180, height: 70 }); const n = canvas.nodes.get(id); setSticky(n, "yellow"); setShape(n, "rounded"); closeMenu(); } },
     { label: "纯文字（无边框）", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 125, y: c.y - 30, text: "", width: 250, height: 60 }); togglePlain(canvas.nodes.get(id)); closeMenu(); } },
     { label: "便签（黄）", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 100, y: c.y - 100, text: "", width: 200, height: 200 }); setSticky(canvas.nodes.get(id), "yellow"); closeMenu(); } },

@@ -303,9 +303,12 @@ export default class CanvasPlusPlugin extends Plugin {
       const center = (c as any).getViewportBBox?.() ?? { minX: 0, minY: 0, maxX: 400, maxY: 300 };
       const x = (center.minX + center.maxX) / 2;
       const y = (center.minY + center.maxY) / 2;
-      const id = createTextViaData(c, { x: x - 150, y: y - 60, text: "# 标题\n\n正文内容", width: 300, height: 120 });
+      const id = createTextViaData(c, { x: x - 150, y: y - 60, text: "正文内容", width: 300, height: 120 });
       const n = c.nodes.get(id);
-      if (n) setTitleCard(n);
+      if (n) {
+        setTitleCard(n);
+        (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" });
+      }
     });
     insertCmd("insert-bubble", "插入：气泡文字", async (c) => {
       const { createTextViaData } = await import("./canvas/canvas-access");

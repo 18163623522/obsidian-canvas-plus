@@ -17,6 +17,7 @@ export const FLAG_STYLE = "cpStyle"; // "plain" 纯文字
 export const FLAG_SHAPE = "cpShape"; // "rounded" | "ellipse" | "diamond"
 export const FLAG_STICKY = "cpSticky"; // "yellow" | "pink" | "blue" | "green"（便签颜色）
 export const FLAG_TEXT_SCALE = "cpTextScale"; // number 文字字号缩放（持久化）
+export const FLAG_TITLE = "cpTitle"; // string 标题卡片的标题文字（独立于正文 text）
 
 // 边样式标记
 export const FLAG_LINE_STYLE = "cpLineStyle"; // "dashed" | "dotted" | "solid"
@@ -99,6 +100,80 @@ export function setEdgeWeight(edge: any, weight: number | undefined): void {
   applyEdgeStyle(edge);
 }
 
+/**
+ * 给标题卡片节点注入一个固定标题栏（DOM 元素 + inline style）。
+ *
+ * 为什么用 DOM 注入而不是 CSS：白板 text 节点的 markdown 渲染 DOM 结构
+ * 在不同 Obsidian 版本里不一致，CSS 选择 h1 经常匹配不到（"看不见"）。
+ * 直接注入一个独立 div 用 inline style，绝对可靠。
+ *
+ * 标题栏是 contenteditable，用户可直接点击编辑；标题存 cpTitle 字段，
+ * 和正文 text 真正分离。
+ */
+function injectTitleBar(node: any, nodeEl: HTMLElement, data: any): void {
+  let bar = nodeEl.querySelector(":scope > .cp-title-bar") as HTMLElement | null;
+  const title: string = data[FLAG_TITLE] ?? "";
+
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.className = "cp-title-bar";
+    bar.setAttribute("data-cp-title-bar", "1");
+    // 全部用 inline style，不依赖外部 CSS
+    bar.style.cssText = [
+      "background: var(--canvas-color, #6366f1)",
+      "color: #fff",
+      "padding: 8px 14px",
+      "font-weight: 700",
+      "font-size: 1.05em",
+      "line-height: 1.4",
+      "cursor: text",
+      "user-select: text",
+      "outline: none",
+      "border-bottom: 1px solid rgba(0,0,0,0.15)",
+      "z-index: 5",
+      "position: relative",
+      "min-height: 20px",
+      "white-space: nowrap",
+      "overflow: hidden",
+      "text-overflow: ellipsis",
+    ].join("; ");
+    // 可编辑
+    bar.contentEditable = "true";
+    // 阻止双击标题栏触发节点编辑（让标题栏自己处理光标）
+    bar.addEventListener("dblclick", (e) => e.stopPropagation());
+    // 阻止 mousedown 冒泡到白板（避免拖动节点）
+    bar.addEventListener("mousedown", (e) => e.stopPropagation());
+    // 失焦时保存标题
+    bar.addEventListener("blur", () => {
+      const newText = bar!.textContent || "";
+      const d = node.getData?.() ?? {};
+      if (d[FLAG_TITLE] !== newText) {
+        node.setData?.({ ...d, [FLAG_TITLE]: newText });
+        node.canvas?.requestSave?.();
+      }
+    });
+    // 插到 nodeEl 最前面（在 container 之前，固定在顶部）
+    nodeEl.insertBefore(bar, nodeEl.firstChild);
+  }
+
+  // 更新标题文字（如果没在编辑）
+  if (document.activeElement !== bar) {
+    bar.textContent = title || "";
+    if (!title) {
+      // 空标题占位
+      bar.style.opacity = "0.5";
+      bar.textContent = "点击输入标题…";
+      bar.addEventListener("focus", function clearPlaceholder() {
+        if (bar!.textContent === "点击输入标题…") bar!.textContent = "";
+        bar!.style.opacity = "1";
+        bar!.removeEventListener("focus", clearPlaceholder);
+      });
+    } else {
+      bar.style.opacity = "1";
+    }
+  }
+}
+
 /** 给单个节点应用所有 cp* 样式标记 */
 export function applyNodeStyle(node: CanvasNode): void {
   const data = node.getData?.() ?? (node as any).nodeData;
@@ -112,8 +187,15 @@ export function applyNodeStyle(node: CanvasNode): void {
 
   // 纯文字
   if (data[FLAG_STYLE] === "plain") nodeEl.classList.add("cp-plain");
-  // 标题卡片（固定标题栏 + 正文）
-  if (data[FLAG_STYLE] === "title-card") nodeEl.classList.add("cp-title-card");
+  // 标题卡片：直接 DOM 注入标题栏（inline style 确保一定看得见）
+  if (data[FLAG_STYLE] === "title-card") {
+    nodeEl.classList.add("cp-title-card");
+    injectTitleBar(node as any, nodeEl, data);
+  } else {
+    // 非标题卡片：移除可能残留的标题栏
+    const staleBar = nodeEl.querySelector(":scope > .cp-title-bar");
+    if (staleBar) staleBar.remove();
+  }
   // 形状
   if (data[FLAG_SHAPE]) nodeEl.classList.add(`cp-shape-${data[FLAG_SHAPE]}`);
   // 便签

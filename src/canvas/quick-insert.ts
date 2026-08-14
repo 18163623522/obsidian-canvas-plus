@@ -103,9 +103,12 @@ export async function insertFileNode(canvas: Canvas, app: App): Promise<void> {
   }
 
   if (chosen.kind === "title") {
-    const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "# 标题\n\n正文内容", width: 300, height: 120 });
+    const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "正文内容", width: 300, height: 120 });
     const n = canvas.nodes.get(id);
-    if (n) setTitleCard(n);
+    if (n) {
+      setTitleCard(n);
+      (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" });
+    }
     reveal(canvas, "标题文字");
     new Notice("已添加标题文字");
     return;
