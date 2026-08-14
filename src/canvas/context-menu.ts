@@ -93,21 +93,31 @@ export function setupContextMenu(plugin: Plugin): () => void {
     const wrapper = canvas?.wrapperEl as HTMLElement | undefined;
     if (!wrapper || handlers.has(wrapper)) return;
 
-    const onCtx = (e: MouseEvent) => {
+    // 用 mousedown 替代 contextmenu（后者被其他插件在 capture 阶段拦截了）
+    // mousedown 也会在右键时触发（e.button === 2），且没人拦
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 2) return; // 只处理右键
+      // 排除编辑区/标题栏/工具条内的右键（那些不弹插入菜单）
+      const target = e.target as HTMLElement;
+      if (target?.closest?.(".cm-content, textarea, input, .cp-title-bar, .cp-floating-toolbar, .cp-quick-insert-btn")) return;
+
       const canvas2 = (leaves[0] as any).view?.canvas;
       if (!canvas2) return;
       diagnoseEventFired = true;
+
       // 记录右键位置（转换成画布坐标）
       try {
         lastContextMenuPos = canvas2.posFromEvt?.(e) ?? canvas2.posFromClient?.({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 };
       } catch {
         lastContextMenuPos = canvas2.pointer ?? { x: 0, y: 0 };
       }
-      // 等原生菜单出现后追加
-      setTimeout(() => appendToNativeMenu(canvas2, plugin), 100);
+
+      // 先尝试追加到原生菜单（给它 150ms 渲染）
+      setTimeout(() => appendToNativeMenu(canvas2, plugin), 150);
     };
-    wrapper.addEventListener("contextmenu", onCtx, true);
-    handlers.set(wrapper, onCtx);
+    // mousedown 用 capture 阶段，抢在其他插件之前
+    wrapper.addEventListener("mousedown", onMouseDown, true);
+    handlers.set(wrapper, onMouseDown);
   };
 
   plugin.app.workspace.onLayoutReady(attach);
@@ -115,7 +125,7 @@ export function setupContextMenu(plugin: Plugin): () => void {
 
   return () => {
     plugin.app.workspace.offref(layoutRef);
-    for (const [el, fn] of handlers) el.removeEventListener("contextmenu", fn, true);
+    for (const [el, fn] of handlers) el.removeEventListener("mousedown", fn, true);
     handlers.clear();
   };
 }
