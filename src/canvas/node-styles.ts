@@ -143,6 +143,13 @@ function injectTitleBar(node: any, nodeEl: HTMLElement, data: any): void {
     bar.addEventListener("dblclick", (e) => e.stopPropagation());
     // 阻止 mousedown 冒泡到白板（避免拖动节点）
     bar.addEventListener("mousedown", (e) => e.stopPropagation());
+    // 占位文字清理（绑一次即可，用 class 判断）
+    bar.addEventListener("focus", () => {
+      if (bar!.classList.contains("cp-title-placeholder")) {
+        bar!.textContent = "";
+        bar!.style.opacity = "1";
+      }
+    });
     // 失焦时保存标题
     bar.addEventListener("blur", () => {
       const newText = bar!.textContent || "";
@@ -158,19 +165,11 @@ function injectTitleBar(node: any, nodeEl: HTMLElement, data: any): void {
 
   // 更新标题文字（如果没在编辑）
   if (document.activeElement !== bar) {
-    bar.textContent = title || "";
-    if (!title) {
-      // 空标题占位
-      bar.style.opacity = "0.5";
-      bar.textContent = "点击输入标题…";
-      bar.addEventListener("focus", function clearPlaceholder() {
-        if (bar!.textContent === "点击输入标题…") bar!.textContent = "";
-        bar!.style.opacity = "1";
-        bar!.removeEventListener("focus", clearPlaceholder);
-      });
-    } else {
-      bar.style.opacity = "1";
-    }
+    const isPlaceholder = !title;
+    bar.textContent = isPlaceholder ? "点击输入标题…" : title;
+    bar.style.opacity = isPlaceholder ? "0.5" : "1";
+    // 占位样式用 CSS 类管理，不重复绑监听器（轮询每 200ms 跑一次）
+    bar.classList.toggle("cp-title-placeholder", isPlaceholder);
   }
 }
 

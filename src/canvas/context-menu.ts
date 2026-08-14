@@ -63,27 +63,36 @@ export function setupContextMenu(plugin: Plugin): () => void {
   };
 }
 
-/** 找到原生菜单 DOM，往里追加我们的项 */
-function appendToNativeMenu(canvas: any, plugin: Plugin) {
+/** 找到原生菜单 DOM，往里追加我们的项（带重试：菜单可能渲染慢） */
+function appendToNativeMenu(canvas: any, plugin: Plugin, attempt = 0) {
+  const DELAYS = [100, 200, 300, 500, 800];
   try {
-    appendToNativeMenuInner(canvas, plugin);
+    const ok = appendToNativeMenuInner(canvas, plugin);
+    if (!ok && attempt < DELAYS.length) {
+      // 菜单还没渲染出来，稍后重试
+      setTimeout(() => appendToNativeMenu(canvas, plugin, attempt + 1), DELAYS[attempt]);
+    }
   } catch (e) {
     console.error("[cp-menu] 追加菜单项失败", e);
   }
 }
 
-function appendToNativeMenuInner(canvas: any, plugin: Plugin) {
-  const menus = Array.from(document.querySelectorAll(".menu"));
+function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
+  const menus = Array.from(document.querySelectorAll(".menu")) as HTMLElement[];
   let menuEl: HTMLElement | null = null;
-  for (const m of menus) {
-    const el = m as HTMLElement;
-    if (!el.classList.contains("cp-submenu") && el.children.length > 0 && !el.classList.contains("is-cp-added")) {
-      menuEl = el;
-      break;
-    }
+  for (const el of menus) {
+    // 排除我们自己的子菜单和已处理过的；必须是挂在 body 上的活菜单
+    if (el.classList.contains("cp-submenu") || el.classList.contains("is-cp-added")) continue;
+    if (!document.body.contains(el)) continue;
+    menuEl = el;
+    break;
   }
-  if (!menuEl) return;
+  if (!menuEl) {
+    console.debug(`[cp-menu] 第 ${attemptLabel()} 没找到原生菜单 DOM`);
+    return false;
+  }
   menuEl.classList.add("is-cp-added");
+  console.debug("[cp-menu] 找到原生菜单，开始追加自定义项");
 
   // 点击菜单项后关闭整个菜单
   const closeMenu = () => {
@@ -109,6 +118,12 @@ function appendToNativeMenuInner(canvas: any, plugin: Plugin) {
   } else {
     appendBlankItems(menuEl, canvas, c, plugin, closeMenu);
   }
+  console.debug(`[cp-menu] 追加完成（选中节点 ${nodes.length} / 连线 ${edges.length}）`);
+  return true;
+}
+
+function attemptLabel(): string {
+  return "次尝试";
 }
 
 // ============================================================
