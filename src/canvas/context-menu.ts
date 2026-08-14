@@ -40,7 +40,9 @@ export function setupContextMenu(plugin: Plugin): () => void {
     const onCtx = (e: MouseEvent) => {
       const canvas2 = (leaves[0] as any).view?.canvas;
       if (!canvas2) return;
-      // 记录右键位置（转换成画布坐标）
+      // 记录右键位置（转换成画布坐标 + 屏幕坐标）
+      lastClientX = e.clientX;
+      lastClientY = e.clientY;
       try {
         lastContextMenuPos = canvas2.posFromEvt?.(e) ?? canvas2.posFromClient?.({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 };
       } catch {
@@ -78,6 +80,18 @@ function appendToNativeMenu(canvas: any, plugin: Plugin, attempt = 0) {
 }
 
 function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
+  // ── 优先：白板原生 popup menu（图标按钮条）──
+  // Obsidian 白板右键弹的是 .canvas-popup-menu，不是标准 .menu！
+  // （装了 advanced-canvas 的环境更是只有这种形态）
+  const popup = document.querySelector(".canvas-popup-menu:not(.is-cp-added)") as HTMLElement | null;
+  if (popup && document.body.contains(popup)) {
+    popup.classList.add("is-cp-added");
+    addInsertButtonToPopupMenu(popup, canvas);
+    console.debug("[cp-menu] 已往 canvas-popup-menu 加插入按钮");
+    return true;
+  }
+
+  // ── fallback：标准 .menu（老版本 Obsidian 或其他场景）──
   const menus = Array.from(document.querySelectorAll(".menu")) as HTMLElement[];
   let menuEl: HTMLElement | null = null;
   for (const el of menus) {
@@ -88,11 +102,11 @@ function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
     break;
   }
   if (!menuEl) {
-    console.debug(`[cp-menu] 第 ${attemptLabel()} 没找到原生菜单 DOM`);
+    console.debug(`[cp-menu] ${attemptLabel()} 没找到菜单 DOM`);
     return false;
   }
   menuEl.classList.add("is-cp-added");
-  console.debug("[cp-menu] 找到原生菜单，开始追加自定义项");
+  console.debug("[cp-menu] 找到标准菜单，开始追加自定义项");
 
   // 点击菜单项后关闭整个菜单
   const closeMenu = () => {
@@ -125,6 +139,107 @@ function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
 function attemptLabel(): string {
   return "次尝试";
 }
+
+/**
+ * 往白板 popup menu（图标按钮条）加一个"插入"按钮。
+ * 点击弹出标准 Obsidian Menu（官方 API，最可靠），
+ * 内含 标题/气泡/便签/纯文字/图片 等插入项，创建在右键位置。
+ */
+function addInsertButtonToPopupMenu(popupEl: HTMLElement, canvas: any): void {
+  // 已加过就跳过（防御）
+  if (popupEl.querySelector(".cp-insert-btn")) return;
+
+  const btn = document.createElement("div");
+  btn.className = "clickable-icon cp-insert-btn";
+  btn.setAttribute("aria-label", "插入节点");
+  btn.style.padding = "6px";
+  // 用 Lucide plus 图标（Obsidian setIcon）
+  try {
+    const { setIcon } = require("obsidian") as any;
+    setIcon(btn, "plus");
+  } catch {
+    btn.textContent = "+";
+  }
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    showInsertMenu(canvas, lastContextMenuPos);
+  });
+  popupEl.appendChild(btn);
+}
+
+/** 弹出插入节点菜单（Obsidian 官方 Menu，任意位置可用） */
+function showInsertMenu(canvas: any, c: { x: number; y: number }): void {
+  const menu = new Menu();
+  const items: Array<{ label: string; fn: () => void }> = [
+    {
+      label: "标题文字（标题栏+正文）",
+      fn: () => {
+        const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "正文内容", width: 300, height: 120 });
+        const n = canvas.nodes.get(id);
+        if (n) { setTitleCard(n); (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" }); }
+      },
+    },
+    {
+      label: "气泡文字",
+      fn: () => {
+        const id = createTextViaData(canvas, { x: c.x - 90, y: c.y - 35, text: "", width: 180, height: 70 });
+        const n = canvas.nodes.get(id);
+        if (n) { setSticky(n, "yellow"); setShape(n, "rounded"); }
+      },
+    },
+    {
+      label: "文本节点",
+      fn: () => { createTextViaData(canvas, { x: c.x - 125, y: c.y - 50, text: "", width: 250, height: 100 }); },
+    },
+    {
+      label: "纯文字（无边框）",
+      fn: () => {
+        const id = createTextViaData(canvas, { x: c.x - 125, y: c.y - 30, text: "", width: 250, height: 60 });
+        const n = canvas.nodes.get(id);
+        if (n) togglePlain(n);
+      },
+    },
+    {
+      label: "便签（黄）",
+      fn: () => {
+        const id = createTextViaData(canvas, { x: c.x - 100, y: c.y - 100, text: "", width: 200, height: 200 });
+        const n = canvas.nodes.get(id);
+        if (n) setSticky(n, "yellow");
+      },
+    },
+    {
+      label: "代码节点",
+      fn: () => { createTextViaData(canvas, { x: c.x - 175, y: c.y - 100, text: "```js\n\n```", width: 350, height: 200 }); },
+    },
+    {
+      label: "公式节点",
+      fn: () => { createTextViaData(canvas, { x: c.x - 125, y: c.y - 60, text: "$$\nE = mc^2\n$$", width: 250, height: 120 }); },
+    },
+    {
+      label: "图片/PDF/视频...",
+      fn: async () => {
+        const m = await import("./quick-insert");
+        m.insertFileNode(canvas, (canvas as any).view?.app ?? (window as any).app);
+      },
+    },
+    {
+      label: "网页嵌入...",
+      fn: () => {
+        const url = window.prompt("输入网址（https://...）", "https://");
+        if (url) createIframeNode(canvas, url);
+      },
+    },
+  ];
+  for (const it of items) {
+    menu.addItem((mi) => mi.setTitle(it.label).onClick(() => { try { it.fn(); } catch (e) { console.error("[cp-menu] 插入失败", e); } }));
+  }
+  menu.showAtMouseEvent(new MouseEvent("click", { clientX: lastClientX, clientY: lastClientY }));
+}
+
+/** 记录最近一次右键的屏幕坐标（菜单弹出位置用） */
+let lastClientX = 200;
+let lastClientY = 200;
 
 // ============================================================
 //  DOM 菜单项构造
