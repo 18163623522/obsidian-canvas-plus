@@ -63,6 +63,12 @@ export function setupQuickInsertButton(plugin: Plugin): () => void {
           const center = c2.posCenter?.() ?? { x: 0, y: 0 };
           showInsertMenu(c2, center, e as MouseEvent);
         });
+        // 右键「+」按钮 = 快速诊断（不用搜命令面板）
+        btn.addEventListener("contextmenu", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          startContextMenuDiagnose(plugin);
+        });
         containerEl.appendChild(btn);
         placed.add(containerEl);
       }
