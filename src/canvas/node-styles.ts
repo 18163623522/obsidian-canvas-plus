@@ -112,6 +112,8 @@ export function applyNodeStyle(node: CanvasNode): void {
 
   // 纯文字
   if (data[FLAG_STYLE] === "plain") nodeEl.classList.add("cp-plain");
+  // 标题卡片（固定标题栏 + 正文）
+  if (data[FLAG_STYLE] === "title-card") nodeEl.classList.add("cp-title-card");
   // 形状
   if (data[FLAG_SHAPE]) nodeEl.classList.add(`cp-shape-${data[FLAG_SHAPE]}`);
   // 便签
@@ -171,6 +173,11 @@ export function togglePlain(node: CanvasNode): boolean {
   const isPlain = data[FLAG_STYLE] === "plain";
   setFlag(node, FLAG_STYLE, isPlain ? undefined : "plain");
   return !isPlain;
+}
+
+// —— 标题卡片（固定标题栏 + 正文区）——
+export function setTitleCard(node: CanvasNode): void {
+  setFlag(node, FLAG_STYLE, "title-card");
 }
 
 // —— 形状 ——

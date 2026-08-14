@@ -7,7 +7,7 @@
 import { App, TFile, Notice, FuzzySuggestModal } from "obsidian";
 import type { Canvas } from "../types/canvas-internal";
 import { createTextViaData, createFileViaData, createLinkViaData } from "./canvas-access";
-import { setTextScale, setSticky, setShape } from "./node-styles";
+import { setTextScale, setSticky, setShape, setTitleCard } from "./node-styles";
 
 /** 在视口中心创建节点 */
 function center(canvas: Canvas): { x: number; y: number } {
@@ -103,9 +103,9 @@ export async function insertFileNode(canvas: Canvas, app: App): Promise<void> {
   }
 
   if (chosen.kind === "title") {
-    const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 35, text: "# 标题", width: 300, height: 70 });
+    const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "# 标题\n\n正文内容", width: 300, height: 120 });
     const n = canvas.nodes.get(id);
-    if (n) setTextScale(n, 1.8);
+    if (n) setTitleCard(n);
     reveal(canvas, "标题文字");
     new Notice("已添加标题文字");
     return;

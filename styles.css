@@ -173,6 +173,55 @@
 }
 
 /* ============================================================
+ * 标题卡片：固定标题栏 + 正文区（仿 Mindo 节点结构）
+ * 约定 text 第一行 # 标题 = 标题栏，其余 = 正文
+ * ============================================================ */
+.canvas-node.cp-title-card .canvas-node-container {
+  border-radius: 10px;
+  overflow: hidden;
+  padding: 0 !important;
+}
+/* 标题栏：第一个 h1 变成色带 */
+.canvas-node.cp-title-card .markdown-preview-view > h1:first-child,
+.canvas-node.cp-title-card .cm-content > h1:first-child,
+.canvas-node.cp-title-card .markdown-embed-content > .markdown-preview-view > h1:first-child {
+  background: var(--canvas-color, var(--color-accent, #6366f1));
+  color: #fff !important;
+  margin: 0 !important;
+  padding: 8px 14px !important;
+  font-size: 1.1em !important;
+  font-weight: 700;
+  border-radius: 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  line-height: 1.4;
+}
+/* 编辑态：标题行（第一行）也套标题栏样式 */
+.canvas-node.cp-title-card .cm-line:first-child {
+  background: var(--canvas-color, var(--color-accent, #6366f1));
+  color: #fff !important;
+  padding: 8px 14px;
+  font-weight: 700;
+  border-radius: 10px 10px 0 0;
+}
+/* 正文区：标题栏下方的内容 */
+.canvas-node.cp-title-card .markdown-preview-view {
+  padding: 10px 14px !important;
+}
+.canvas-node.cp-title-card .cm-content {
+  padding-top: 4px;
+}
+/* 没写标题（空节点）时给一个占位标题栏 */
+.canvas-node.cp-title-card .cm-content:empty::before {
+  content: "标题...";
+  color: rgba(255, 255, 255, 0.7);
+  background: var(--canvas-color, var(--color-accent, #6366f1));
+  display: block;
+  padding: 8px 14px;
+  font-weight: 700;
+  border-radius: 10px 10px 0 0;
+}
+
+/* ============================================================
  * 节点形状（圆角 / 椭圆 / 菱形）——参考 tldraw/AFFiNE
  * ============================================================ */
 .canvas-node.cp-shape-rounded .canvas-node-container {

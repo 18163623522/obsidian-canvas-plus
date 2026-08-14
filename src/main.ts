@@ -299,13 +299,13 @@ export default class CanvasPlusPlugin extends Plugin {
     insertCmd("insert-math", "插入：公式节点", (c) => insertMathNode(c));
     insertCmd("insert-title", "插入：标题文字", async (c) => {
       const { createTextViaData } = await import("./canvas/canvas-access");
-      const { setTextScale } = await import("./canvas/node-styles");
+      const { setTitleCard } = await import("./canvas/node-styles");
       const center = (c as any).getViewportBBox?.() ?? { minX: 0, minY: 0, maxX: 400, maxY: 300 };
       const x = (center.minX + center.maxX) / 2;
       const y = (center.minY + center.maxY) / 2;
-      const id = createTextViaData(c, { x: x - 150, y: y - 35, text: "# 标题", width: 300, height: 70 });
+      const id = createTextViaData(c, { x: x - 150, y: y - 60, text: "# 标题\n\n正文内容", width: 300, height: 120 });
       const n = c.nodes.get(id);
-      if (n) setTextScale(n, 1.8);
+      if (n) setTitleCard(n);
     });
     insertCmd("insert-bubble", "插入：气泡文字", async (c) => {
       const { createTextViaData } = await import("./canvas/canvas-access");
