@@ -122,18 +122,20 @@ export function setupContextMenu(plugin: Plugin): () => void {
 let diagnoseActive = false;
 let diagnoseEventFired = false;
 let diagnoseMenuFound = false;
+let diagnosePopupClasses: string[] = [];
+let diagnoseMenuClasses: string[] = [];
 
 /**
  * 诊断命令：开启 15 秒诊断窗口。
- * 用户右键白板一次后，报告链路各环节状态：
- *   ① 监听是否挂上 ② 事件是否触发 ③ 原生菜单是否出现 ④ 追加是否成功
+ * 右键一次后报告：①监听 ②事件 ③菜单出现情况 ④菜单 class 名
  */
 export function startContextMenuDiagnose(plugin: Plugin): void {
   diagnoseActive = false;
   diagnoseEventFired = false;
   diagnoseMenuFound = false;
+  diagnosePopupClasses = [];
+  diagnoseMenuClasses = [];
 
-  // ① 检查监听是否挂上
   let attached = false;
   let wrapperInfo = "无";
   try {
@@ -144,22 +146,23 @@ export function startContextMenuDiagnose(plugin: Plugin): void {
     wrapperInfo = wrapper ? `${wrapper.className.slice(0, 40)}...` : "wrapperEl 不存在";
   } catch {}
 
-  // 列出当前页面所有菜单类元素（右键前先记录基线）
   const baseMenus = document.querySelectorAll(".menu, .canvas-popup-menu").length;
 
   diagnoseActive = true;
-  new Notice(`诊断已开启（15 秒内右键白板一次）\n监听挂载: ${attached ? "✓" : "✗ " + wrapperInfo}`, 6000);
+  new Notice(`诊断已开启（15 秒内右键白板一次）\n监听: ${attached ? "✓" : "✗ " + wrapperInfo}`, 6000);
 
   setTimeout(() => {
     diagnoseActive = false;
     const nowMenus = document.querySelectorAll(".menu, .canvas-popup-menu").length;
     const parts = [
-      `① 监听挂载: ${attached ? "✓" : "✗（wrapperEl 拿不到）"}`,
-      `② 右键事件: ${diagnoseEventFired ? "✓" : "✗（未触发）"}`,
-      `③ 原生菜单: ${diagnoseMenuFound ? "✓ 已增强" : nowMenus > baseMenus ? "出现但未识别" : "✗ 未弹出"}`,
+      `① 监听: ${attached ? "✓" : "✗"}`,
+      `② 事件: ${diagnoseEventFired ? "✓" : "✗"}`,
+      `③ 菜单: ${diagnoseMenuFound ? "✓已增强" : nowMenus > baseMenus ? "出现但未识别" : "✗未弹出"}`,
     ];
-    new Notice(`右键诊断结果：\n${parts.join("\n")}\n（详情看控制台 [cp-menu] 日志）`, 10000);
-    console.log("[cp-menu] 诊断结果", { attached, eventFired: diagnoseEventFired, menuFound: diagnoseMenuFound, baseMenus, nowMenus });
+    if (diagnosePopupClasses.length > 0) parts.push(`popup-menu class: ${diagnosePopupClasses.join(", ")}`);
+    if (diagnoseMenuClasses.length > 0) parts.push(`.menu class: ${diagnoseMenuClasses.join(", ")}`);
+    new Notice(`右键诊断：\n${parts.join("\n")}`, 12000);
+    console.log("[cp-menu] 诊断详情", { attached, eventFired: diagnoseEventFired, menuFound: diagnoseMenuFound, baseMenus, nowMenus, diagnosePopupClasses, diagnoseMenuClasses });
   }, 15000);
 }
 
@@ -191,28 +194,33 @@ function appendToNativeMenu(canvas: any, plugin: Plugin, attempt = 0) {
 
 function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
   // ── 优先：白板原生 popup menu（图标按钮条）──
-  // Obsidian 白板右键弹的是 .canvas-popup-menu，不是标准 .menu！
-  // （装了 advanced-canvas 的环境更是只有这种形态）
   const popup = document.querySelector(".canvas-popup-menu:not(.is-cp-added)") as HTMLElement | null;
   if (popup && document.body.contains(popup)) {
+    if (diagnoseActive) diagnosePopupClasses = Array.from(popup.classList);
     popup.classList.add("is-cp-added");
     addInsertButtonToPopupMenu(popup, canvas);
     console.debug("[cp-menu] 已往 canvas-popup-menu 加插入按钮");
     return true;
   }
 
-  // ── fallback：标准 .menu（老版本 Obsidian 或其他场景）──
+  // ── fallback：标准 .menu ──
   const menus = Array.from(document.querySelectorAll(".menu")) as HTMLElement[];
   let menuEl: HTMLElement | null = null;
   for (const el of menus) {
-    // 排除我们自己的子菜单和已处理过的；必须是挂在 body 上的活菜单
     if (el.classList.contains("cp-submenu") || el.classList.contains("is-cp-added")) continue;
     if (!document.body.contains(el)) continue;
+    if (diagnoseActive) diagnoseMenuClasses = Array.from(el.classList);
     menuEl = el;
     break;
   }
   if (!menuEl) {
-    console.debug(`[cp-menu] ${attemptLabel()} 没找到菜单 DOM`);
+    // 诊断模式：列出页面上所有菜单类元素，帮定位
+    if (diagnoseActive) {
+      const all = Array.from(document.querySelectorAll("[class*='menu'], [class*='popup'], [class*='context']")) as HTMLElement[];
+      const classes = all.slice(0, 10).map((el) => el.className.slice(0, 60));
+      console.log("[cp-menu] 页面上的菜单类元素:", classes);
+    }
+    console.debug("[cp-menu] 没找到菜单 DOM");
     return false;
   }
   menuEl.classList.add("is-cp-added");
