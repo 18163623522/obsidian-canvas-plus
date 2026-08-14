@@ -124,7 +124,7 @@ export class FloatingToolbar {
       return b;
     };
 
-    // -- 颜色（固定色块 + 色轮自由选色）--
+    // -- 颜色（原生 6 色块 + 色轮）--
     const colorRow = makeGroup("颜色");
     for (const [key, info] of Object.entries(COLORS)) {
       const b = btn(colorRow, "", `颜色：${info.label}`, () => {
@@ -159,15 +159,43 @@ export class FloatingToolbar {
           try { (n as any).setColor?.(picker.value); } catch (e) { console.error(e); }
         }
       };
+    }
 
-      // "+" 存颜色按钮：把选中节点的当前颜色存成快捷色块
-      const saveColorBtn = colorRow.createEl("button", {
-        cls: "cp-color-btn cp-color-save-btn",
-        attr: { title: "保存当前颜色为快捷色块", "aria-label": "保存颜色" },
+    // -- 我的颜色（用户保存的快捷色块，单独成组不和原生混）--
+    {
+      const savedColors: string[] = this.plugin?.settings?.savedColors || [];
+      // 只在有保存的颜色时才显示这组
+      const myRow = savedColors.length > 0 ? makeGroup("我的颜色") : null;
+      if (myRow) {
+        for (const hex of savedColors) {
+          const sb = myRow.createEl("button", {
+            cls: "cp-color-btn cp-saved-swatch",
+            attr: { title: `${hex}（左键应用 / 右键删除）`, "aria-label": hex },
+          });
+          sb.style.background = hex;
+          sb.onclick = () => {
+            for (const n of nodes) {
+              try { (n as any).setColor?.(hex); } catch (e) { console.error(e); }
+            }
+          };
+          sb.addEventListener("contextmenu", async (e) => {
+            e.preventDefault();
+            if (!this.plugin) return;
+            this.plugin.settings.savedColors = (this.plugin.settings.savedColors || []).filter((c: string) => c !== hex);
+            await this.plugin.saveSettings();
+            new Notice(`已删除颜色 ${hex}`);
+            this.onSelectionChanged(this.currentCanvas);
+          });
+        }
+      }
+      // "+" 存颜色按钮：单独放在"我的颜色"组标题旁（没存过颜色时也显示入口）
+      const saveRow = makeGroup("保存当前颜色");
+      const saveColorBtn = saveRow.createEl("button", {
+        cls: "cp-tb-btn cp-color-save-btn",
+        attr: { title: "把选中节点的颜色存为快捷色块", "aria-label": "保存颜色" },
       });
-      saveColorBtn.textContent = "+";
-      saveColorBtn.style.fontWeight = "700";
-      saveColorBtn.style.fontSize = "16px";
+      saveColorBtn.textContent = "💾 存为快捷颜色";
+      saveColorBtn.style.fontSize = "12px";
       saveColorBtn.onclick = async () => {
         if (!this.plugin) return;
         const curColor = nodes[0]?.getData?.()?.color;
@@ -175,7 +203,6 @@ export class FloatingToolbar {
           new Notice("请先给节点选个颜色再保存");
           return;
         }
-        // 索引颜色转 hex（便于色块显示）
         let hex = curColor;
         if (!curColor.startsWith("#")) {
           hex = (COLORS as any)[curColor]?.bg ?? curColor;
@@ -186,35 +213,11 @@ export class FloatingToolbar {
           this.plugin.settings.savedColors = saved;
           await this.plugin.saveSettings();
           new Notice(`颜色 ${hex} 已保存`);
-          // 刷新工具条显示新色块
           this.onSelectionChanged(this.currentCanvas);
         } else {
           new Notice("这个颜色已经保存过了");
         }
       };
-
-      // 已保存的快捷颜色色块（点击应用，右键删除）
-      const savedColors: string[] = this.plugin?.settings?.savedColors || [];
-      for (const hex of savedColors) {
-        const sb = colorRow.createEl("button", {
-          cls: "cp-color-btn cp-saved-swatch",
-          attr: { title: `${hex}（左键应用 / 右键删除）`, "aria-label": hex },
-        });
-        sb.style.background = hex;
-        sb.onclick = () => {
-          for (const n of nodes) {
-            try { (n as any).setColor?.(hex); } catch (e) { console.error(e); }
-          }
-        };
-        sb.addEventListener("contextmenu", async (e) => {
-          e.preventDefault();
-          if (!this.plugin) return;
-          this.plugin.settings.savedColors = (this.plugin.settings.savedColors || []).filter((c: string) => c !== hex);
-          await this.plugin.saveSettings();
-          new Notice(`已删除颜色 ${hex}`);
-          this.onSelectionChanged(this.currentCanvas);
-        });
-      }
     }
 
     // -- 字号（无极滑块）--
@@ -287,31 +290,17 @@ export class FloatingToolbar {
       });
     }
 
-    // -- 样式模版（存当前样式 / 应用已存模版）--
+    // -- 我的模版（应用已存模版）--
     {
       const { extractNodeStyle, applyTemplateToNode } = await import("./node-styles");
-      const tplRow = makeGroup("样式模版");
-
-      // 存为模版：读第一个节点的样式，弹输入框命名
-      const saveBtn = btn(tplRow, "★", "把当前节点样式存为模版", async () => {
-        if (!this.plugin) return;
-        const style = extractNodeStyle(nodes[0]);
-        const name = window.prompt("给这个样式模版起个名字：", this.guessTemplateName(style));
-        if (!name) return;
-        this.plugin.settings.styleTemplates = this.plugin.settings.styleTemplates || [];
-        this.plugin.settings.styleTemplates.push({ name, ...style });
-        await this.plugin.saveSettings();
-        new Notice(`已保存模版「${name}」`);
-      });
-      saveBtn.style.color = "var(--color-yellow)";
-
-      // 应用模版：下拉选择已存模版
       const tpls: any[] = this.plugin?.settings?.styleTemplates || [];
+      // 有模版才显示应用组
       if (tpls.length > 0) {
-        const select = tplRow.createEl("select", { cls: "cp-tb-tpl-select" });
-        select.style.maxWidth = "120px";
+        const applyRow = makeGroup("我的模版");
+        const select = applyRow.createEl("select", { cls: "cp-tb-tpl-select" });
+        select.style.maxWidth = "140px";
         select.style.fontSize = "12px";
-        select.createEl("option", { text: "应用模版…", value: "" });
+        select.createEl("option", { text: "选择模版应用…", value: "" });
         for (let i = 0; i < tpls.length; i++) {
           select.createEl("option", { text: tpls[i].name, value: String(i) });
         }
@@ -322,6 +311,27 @@ export class FloatingToolbar {
           select.value = "";
         };
       }
+
+      // 存模版：单独一组，文字按钮明确
+      const saveTplRow = makeGroup("保存当前样式");
+      const saveTplBtn = saveTplRow.createEl("button", {
+        cls: "cp-tb-btn",
+        attr: { title: "把当前节点的完整样式（颜色+字号+形状）存为模版", "aria-label": "存为模版" },
+      });
+      saveTplBtn.textContent = "★ 存为样式模版";
+      saveTplBtn.style.fontSize = "12px";
+      saveTplBtn.style.color = "var(--color-yellow)";
+      saveTplBtn.onclick = async () => {
+        if (!this.plugin) return;
+        const style = extractNodeStyle(nodes[0]);
+        const name = window.prompt("给这个样式模版起个名字：", this.guessTemplateName(style));
+        if (!name) return;
+        this.plugin.settings.styleTemplates = this.plugin.settings.styleTemplates || [];
+        this.plugin.settings.styleTemplates.push({ name, ...style });
+        await this.plugin.saveSettings();
+        new Notice(`已保存模版「${name}」`);
+        this.onSelectionChanged(this.currentCanvas);
+      };
     }
 
     // -- 对齐（多选时才有意义） --
