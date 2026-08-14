@@ -178,8 +178,7 @@
  * ============================================================ */
 .canvas-node.cp-title-card .canvas-node-container {
   border-radius: 10px;
-  overflow: hidden;
-  padding: 0 !important;
+  /* 注意：不能用 overflow:hidden —— 会裁掉白板贴边的连接把手（拖箭头的小圆点） */
 }
 /* 标题栏：第一个 h1 变成色带 */
 .canvas-node.cp-title-card .markdown-preview-view > h1:first-child,
