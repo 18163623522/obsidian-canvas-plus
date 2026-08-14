@@ -111,7 +111,7 @@ export class FloatingToolbar {
       return b;
     };
 
-    // -- 颜色 --
+    // -- 颜色（固定色块 + 色轮自由选色）--
     const colorRow = makeGroup("颜色");
     for (const [key, info] of Object.entries(COLORS)) {
       const b = btn(colorRow, "", `颜色：${info.label}`, () => {
@@ -121,6 +121,31 @@ export class FloatingToolbar {
       });
       b.classList.add("cp-color-btn");
       b.style.background = info.bg;
+    }
+    // 色轮：HTML5 原生 color picker，支持任意 hex 颜色（无极调节）
+    {
+      const pickerWrap = colorRow.createEl("label", {
+        cls: "cp-color-btn cp-color-picker-wrap",
+        attr: { title: "自定义颜色（色轮）", "aria-label": "自定义颜色（色轮）" },
+      });
+      pickerWrap.style.background = "conic-gradient(red, yellow, lime, cyan, blue, magenta, red)";
+      pickerWrap.style.position = "relative";
+      pickerWrap.style.overflow = "hidden";
+      const picker = pickerWrap.createEl("input", {
+        type: "color",
+        attr: { value: "#ffffff" },
+      });
+      picker.style.position = "absolute";
+      picker.style.inset = "0";
+      picker.style.width = "100%";
+      picker.style.height = "100%";
+      picker.style.opacity = "0";
+      picker.style.cursor = "pointer";
+      picker.oninput = () => {
+        for (const n of nodes) {
+          try { (n as any).setColor?.(picker.value); } catch (e) { console.error(e); }
+        }
+      };
     }
 
     // -- 字号 --

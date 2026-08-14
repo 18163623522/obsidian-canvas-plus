@@ -436,3 +436,54 @@
   border-radius: 6px;
   cursor: pointer;
 }
+
+/* ============================================================
+ * 编辑器浮动工具条：字号面板 + 分隔符
+ * ============================================================ */
+.cp-tf-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--background-modifier-border);
+  margin: 0 2px;
+  align-self: center;
+}
+.cp-tf-font-btn sub {
+  font-size: 0.65em;
+}
+.cp-tf-font-panel {
+  position: fixed;
+  z-index: 1000;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  width: 260px;
+}
+.cp-tf-font-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.cp-tf-font-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cp-tf-font-presets button {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* 白板色轮按钮（覆盖在固定色块后面）*/
+.cp-color-picker-wrap {
+  cursor: pointer;
+  position: relative;
+}
+.cp-color-picker-wrap input[type="color"] {
+  border: none;
+  padding: 0;
+}
