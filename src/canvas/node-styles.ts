@@ -130,12 +130,14 @@ function injectTitleBar(node: any, nodeEl: HTMLElement, data: any): void {
       "user-select: text",
       "outline: none",
       "border-bottom: 1px solid rgba(0,0,0,0.15)",
-      "z-index: 5",
-      "position: relative",
+      "border-radius: 10px 10px 0 0",
       "min-height: 20px",
       "white-space: nowrap",
       "overflow: hidden",
       "text-overflow: ellipsis",
+      "display: block",
+      "width: 100%",
+      "box-sizing: border-box",
     ].join("; ");
     // 可编辑
     bar.contentEditable = "true";
@@ -159,8 +161,11 @@ function injectTitleBar(node: any, nodeEl: HTMLElement, data: any): void {
         node.canvas?.requestSave?.();
       }
     });
-    // 插到 nodeEl 最前面（在 container 之前，固定在顶部）
-    nodeEl.insertBefore(bar, nodeEl.firstChild);
+    // 插到内容容器内部最前面（文档流内，正文自然往下排，不重叠）
+    // 之前插在 nodeEl 层（与 container 平级）导致和全高的内容区重叠
+    const container = nodeEl.querySelector(":scope > .canvas-node-container") as HTMLElement | null;
+    const host = container ?? nodeEl;
+    host.insertBefore(bar, host.firstChild);
   }
 
   // 更新标题文字（如果没在编辑）
@@ -191,8 +196,8 @@ export function applyNodeStyle(node: CanvasNode): void {
     nodeEl.classList.add("cp-title-card");
     injectTitleBar(node as any, nodeEl, data);
   } else {
-    // 非标题卡片：移除可能残留的标题栏
-    const staleBar = nodeEl.querySelector(":scope > .cp-title-bar");
+    // 非标题卡片：移除可能残留的标题栏（在 container 内或 nodeEl 直下）
+    const staleBar = nodeEl.querySelector(".cp-title-bar");
     if (staleBar) staleBar.remove();
   }
   // 形状
