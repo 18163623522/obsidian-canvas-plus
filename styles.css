@@ -708,6 +708,9 @@
 .cp-quick-insert-btn svg {
   width: 20px;
   height: 20px;
+}
+
+/* ============================================================
  * Mindo 色带卡片皮肤 —— 逐字复刻自 mindo-canvas 原版 styles.css
  * 仅两处适配：① 标题选择器兼容新 DOM（h1 包在 .el-h1 里）
  *           ② 色带/标题颜色加 --cp-band-color 兜底（预设色下 --canvas-color 为空）
