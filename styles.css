@@ -61,15 +61,14 @@
   position: fixed;
   z-index: var(--layer-menu, 100);
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
-  border-radius: 10px;
+  border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   font-size: 13px;
-  min-width: 120px;
 }
 .cp-tb-section {
   display: flex;
