@@ -1133,3 +1133,14 @@
   list-style-position: inside;
   padding-inline-start: 0;
 }
+/* 无标题卡（band）：正文在正文区里垂直居中。
+ * 大字号/单行时文字会沉到卡面下半截（块布局从顶排），改 flex 居中。
+ * 注意必须用 unsafe center：这类卡内容常超出正文区几像素
+ * （大行高的 leading 所致，字形本身放得下），safe center 会整体回落到
+ * 顶部对齐导致修复失效；超长内容请把卡片拉高，而不是靠滚动。 */
+.cp-mindo-band + .cp-mindo-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+  justify-content: center;
+}
