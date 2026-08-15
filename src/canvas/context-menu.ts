@@ -149,14 +149,11 @@ export function setupContextMenu(plugin: Plugin): () => void {
         lastContextMenuPos = canvas2.pointer ?? { x: 0, y: 0 };
       }
 
-      // 兜底：1 秒后检查原生菜单里有没有我们的项，没有就强制弹我们的菜单
-      setTimeout(() => {
-        const hasOurItems = document.querySelector(".cp-insert-btn, .menu.is-cp-added, .cp-submenu");
-        if (!hasOurItems) {
-          console.debug("[cp-menu] 原生菜单没有我们的项，强制弹菜单");
-          showInsertMenu(canvas2, lastContextMenuPos);
-        }
-      }, 1000);
+      // 菜单 DOM 在 contextmenu 之后才出现：走重试追加（100~800ms）。
+      // 重试耗尽仍找不到原生菜单，才弹我们自己的完整菜单兜底——
+      // 原生菜单在场时绝不弹，避免双菜单（1.13.7 右键不走 canvas.menu.render，
+      // 方案 A 的 patch 不会触发，追加入口必须挂在这里）
+      setTimeout(() => appendToNativeMenu(canvas2, plugin), 0);
     };
     document.addEventListener("mousedown", onMouseDown, true);
     handlers.set(containerEl, onMouseDown);
