@@ -170,8 +170,17 @@ export default class CanvasPlusPlugin extends Plugin {
     // 1. 选中变化监听（monkey-patch，派发自定义事件）
     this.uninstallSelectionPatch = patchCanvasSelection(this);
     // 2. 浮动工具条（选中节点时弹出）
-    this.toolbar = new FloatingToolbar(this.app, this);
+    this.toolbar = new FloatingToolbar(this.app);
     this.toolbar.positionMode = this.settings.toolbarPosition;
+    this.toolbar.getSavedColors = () => this.settings.savedColors ?? [];
+    this.toolbar.saveColor = async (hex) => {
+      const list = this.settings.savedColors ?? (this.settings.savedColors = []);
+      const i = list.indexOf(hex);
+      if (i >= 0) list.splice(i, 1); // 去重后置顶（最近用在最后）
+      list.push(hex);
+      if (list.length > 10) list.splice(0, list.length - 10);
+      await this.saveSettings();
+    };
     this.registerEvent(
       this.app.workspace.on(SELECTION_CHANGED_EVENT as any, (canvas: any) => {
         this.toolbar.onSelectionChanged(canvas);

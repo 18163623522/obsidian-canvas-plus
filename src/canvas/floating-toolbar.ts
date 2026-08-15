@@ -30,7 +30,6 @@ const TOOLBAR_ID = "cp-floating-toolbar";
 export class FloatingToolbar {
   private el: HTMLElement | null = null;
   private app: App;
-  private plugin: any;
   private currentCanvas: any = null;
   // 跟随机制：记录当前选中的节点/边，定时重算屏幕位置
   private currentNodes: CanvasNode[] | null = null;
@@ -43,9 +42,8 @@ export class FloatingToolbar {
   /** 保存一个颜色到调色板（持久化），由 main.ts 接 saveSettings */
   saveColor?: (hex: string) => void;
 
-  constructor(app: App, plugin?: any) {
+  constructor(app: App) {
     this.app = app;
-    this.plugin = plugin;
   }
 
   /** 由 selection-changed 事件调用 */
@@ -119,192 +117,188 @@ export class FloatingToolbar {
     return el;
   }
 
-  /** 根据样式属性猜一个默认模版名 */
-  private guessTemplateName(style: any): string {
-    const parts: string[] = [];
-    if (style.cpSticky) parts.push(style.cpSticky + "便签");
-    if (style.cpShape) parts.push(style.cpShape);
-    if (style.cpTextScale) parts.push(Math.round(style.cpTextScale * 100) + "%");
-    if (style.cpStyle === "plain") parts.push("纯文字");
-    if (parts.length === 0) return "新模版";
-    return parts.join("·");
-  }
-
-  private async show(nodes: CanvasNode[]): Promise<void> {
+  private show(nodes: CanvasNode[]): void {
     const el = this.ensureEl();
     el.empty();
     el.style.display = "flex";
-    el.style.flexDirection = "column";
     this.currentNodes = nodes;
     this.currentEdges = null;
     this.startFollow();
 
-    // 辅助：创建一个带标题的分组
-    const makeGroup = (title: string): HTMLElement => {
-      const g = el.createDiv({ cls: "cp-tb-section" });
-      if (title) g.createDiv({ cls: "cp-tb-section-title", text: title });
-      const row = g.createDiv({ cls: "cp-tb-group" });
-      return row;
-    };
-    // 辅助：创建按钮
-    const btn = (parent: HTMLElement, label: string, title: string, onClick: () => void): HTMLElement => {
-      const b = parent.createEl("button", { cls: "cp-tb-btn", attr: { title, "aria-label": title } });
-      b.textContent = label;
-      b.onclick = onClick;
-      return b;
-    };
+    const single = nodes.length === 1;
+    const n0 = nodes[0];
 
-    // -- 颜色（原生 6 色块 + 色轮）--
-    const colorRow = makeGroup("颜色");
-    for (const [key, info] of Object.entries(COLORS)) {
-      const b = btn(colorRow, "", `颜色：${info.label}`, () => {
-        for (const n of nodes) {
-          try { if (key === "none") (n as any).setColor?.(""); else (n as any).setColor?.(key); } catch (e) { console.error(e); }
-        }
+    // —— 对齐/分布（需多选） ——
+    const alignGroup = el.createDiv({ cls: "cp-tb-group" });
+    const aligns = [
+      { icon: "⇤", title: "左对齐", fn: () => this.alignLeft(nodes) },
+      { icon: "↔", title: "水平居中", fn: () => this.alignHCenter(nodes) },
+      { icon: "⇥", title: "右对齐", fn: () => this.alignRight(nodes) },
+      { icon: "⇧", title: "顶对齐", fn: () => this.alignTop(nodes) },
+      { icon: "↕", title: "垂直居中", fn: () => this.alignVCenter(nodes) },
+      { icon: "⇩", title: "底对齐", fn: () => this.alignBottom(nodes) },
+      { icon: "⥆", title: "水平等距", fn: () => this.distributeH(nodes) },
+      { icon: "⇅", title: "垂直等距", fn: () => this.distributeV(nodes) },
+    ];
+    for (const a of aligns) {
+      const btn = alignGroup.createEl("button", {
+        cls: "cp-tb-btn cp-align-btn",
+        attr: { title: a.title, "aria-label": a.title },
       });
-      b.classList.add("cp-color-btn");
-      b.style.background = info.bg;
-    }
-    // 色轮：HTML5 原生 color picker，支持任意 hex 颜色（无极调节）
-    {
-      const pickerWrap = colorRow.createEl("label", {
-        cls: "cp-color-btn cp-color-picker-wrap",
-        attr: { title: "自定义颜色（色轮）", "aria-label": "自定义颜色（色轮）" },
-      });
-      pickerWrap.style.background = "conic-gradient(red, yellow, lime, cyan, blue, magenta, red)";
-      pickerWrap.style.position = "relative";
-      pickerWrap.style.overflow = "hidden";
-      const picker = pickerWrap.createEl("input", {
-        type: "color",
-        attr: { value: "#ffffff" },
-      });
-      picker.style.position = "absolute";
-      picker.style.inset = "0";
-      picker.style.width = "100%";
-      picker.style.height = "100%";
-      picker.style.opacity = "0";
-      picker.style.cursor = "pointer";
-      picker.oninput = () => {
-        for (const n of nodes) {
-          try { (n as any).setColor?.(picker.value); } catch (e) { console.error(e); }
-        }
-      };
+      btn.textContent = a.icon;
+      btn.onclick = a.fn;
     }
 
-    // -- 我的颜色（用户保存的快捷色块，单独成组不和原生混）--
-    {
-      const savedColors: string[] = this.plugin?.settings?.savedColors || [];
-      // 只在有保存的颜色时才显示这组
-      const myRow = savedColors.length > 0 ? makeGroup("我的颜色") : null;
-      if (myRow) {
-        for (const hex of savedColors) {
-          const sb = myRow.createEl("button", {
-            cls: "cp-color-btn cp-saved-swatch",
-            attr: { title: `${hex}（左键应用 / 右键删除）`, "aria-label": hex },
-          });
-          sb.style.background = hex;
-          sb.onclick = () => {
-            for (const n of nodes) {
-              try { (n as any).setColor?.(hex); } catch (e) { console.error(e); }
-            }
-          };
-          sb.addEventListener("contextmenu", async (e) => {
-            e.preventDefault();
-            if (!this.plugin) return;
-            this.plugin.settings.savedColors = (this.plugin.settings.savedColors || []).filter((c: string) => c !== hex);
-            await this.plugin.saveSettings();
-            new Notice(`已删除颜色 ${hex}`);
-            this.onSelectionChanged(this.currentCanvas);
-          });
-        }
-      }
-      // "+" 存颜色按钮：单独放在"我的颜色"组标题旁（没存过颜色时也显示入口）
-      const saveRow = makeGroup("保存当前颜色");
-      const saveColorBtn = saveRow.createEl("button", {
-        cls: "cp-tb-btn cp-color-save-btn",
-        attr: { title: "把选中节点的颜色存为快捷色块", "aria-label": "保存颜色" },
-      });
-      saveColorBtn.textContent = "💾 存为快捷颜色";
-      saveColorBtn.style.fontSize = "12px";
-      saveColorBtn.onclick = async () => {
-        if (!this.plugin) return;
-        const curColor = nodes[0]?.getData?.()?.color;
-        if (!curColor) {
-          new Notice("请先给节点选个颜色再保存");
-          return;
-        }
-        let hex = curColor;
-        if (!curColor.startsWith("#")) {
-          hex = (COLORS as any)[curColor]?.bg ?? curColor;
-        }
-        const saved: string[] = this.plugin.settings.savedColors || [];
-        if (!saved.includes(hex)) {
-          saved.push(hex);
-          this.plugin.settings.savedColors = saved;
-          await this.plugin.saveSettings();
-          new Notice(`颜色 ${hex} 已保存`);
-          this.onSelectionChanged(this.currentCanvas);
-        } else {
-          new Notice("这个颜色已经保存过了");
-        }
-      };
-    }
+    el.createDiv({ cls: "cp-tb-divider" });
 
-    // -- 字号（无极滑块）--
-    const sizeRow = makeGroup("字号");
-    {
-      const { setTextScale } = await import("./node-styles");
-      // 读当前节点字号预填
-      let curScale = 1;
-      try {
-        const d = nodes[0]?.getData?.();
-        if (d?.cpTextScale != null) curScale = d.cpTextScale;
-      } catch {}
-      const wrap = sizeRow.createDiv({ cls: "cp-tb-fontsize-wrap" });
-      wrap.style.display = "flex";
-      wrap.style.alignItems = "center";
-      wrap.style.gap = "6px";
-      wrap.style.width = "100%";
-      const slider = wrap.createEl("input", { type: "range" });
-      slider.min = "0.5";
-      slider.max = "3";
-      slider.step = "0.05";
-      slider.value = String(curScale);
-      slider.style.flex = "1";
-      slider.style.cursor = "pointer";
-      const label = wrap.createEl("span", { text: `${Math.round(curScale * 100)}%` });
-      label.style.fontSize = "11px";
-      label.style.minWidth = "36px";
-      label.style.textAlign = "right";
-      // 重置按钮
-      const resetBtn = wrap.createEl("button", { cls: "cp-tb-btn", text: "1×" });
-      resetBtn.title = "标准字号";
-      resetBtn.style.fontSize = "11px";
-      resetBtn.onclick = () => {
-        slider.value = "1";
-        label.setText("100%");
-        for (const n of nodes) setTextScale(n, undefined);
-      };
-      slider.oninput = () => {
-        const s = parseFloat(slider.value);
-        label.setText(`${Math.round(s * 100)}%`);
-        for (const n of nodes) setTextScale(n, s);
-      };
-    }
-
-    // -- Mindo 卡片样式 / 正文对齐 / 色条 / 尺寸 / 连线（合并自 0.8.x 工具条）--
-    const cpRow = makeGroup("Mindo");
-    // 合并块的共享辅助
+    // —— 无级调节行：色轮 + 色条 + 字号滑杆 ——
+    // 点选节点直接调卡片颜色和文字大小（不要求进入编辑态）
+    const tuneRow = el.createDiv({ cls: "cp-tb-tune" });
     const firstData = (): any => (nodes[0] as any)?.getData?.() ?? {};
+
     const applyColor = (hex: string) => {
       for (const n of nodes) {
         try {
           const d = (n as any).getData?.() ?? {};
           (n as any).setData?.({ ...d, color: hex });
-        } catch (e) { console.error(e); }
+        } catch (e) {
+          console.error(e);
+        }
       }
       this.currentCanvas?.requestSave?.();
     };
+
+    // 色轮：系统取色器，任意颜色（只改选中卡片的颜色，不自动保存；
+    // 要存模版点旁边的"＋"）
+    const wheel = tuneRow.createEl("input", {
+      cls: "cp-tb-wheel",
+      attr: { type: "color", title: "色轮：改选中卡片的颜色（保存请点＋）", "aria-label": "色轮" },
+    });
+    const curColor = String(firstData().color ?? "");
+    if (/^#[0-9a-fA-F]{6}/.test(curColor)) wheel.value = curColor;
+    wheel.addEventListener("input", () => {
+      if (wheel.value) applyColor(wheel.value);
+    });
+
+    // 已保存颜色（调色板）：点击一键套用
+    const palette = tuneRow.createDiv({ cls: "cp-tb-palette" });
+    const renderPalette = () => {
+      palette.empty();
+      const saved = this.getSavedColors?.() ?? [];
+      for (const hex of saved.slice(-10)) {
+        const dot = palette.createEl("button", {
+          cls: "cp-tb-swatch",
+          attr: { title: `套用 ${hex}`, "aria-label": `颜色 ${hex}` },
+        });
+        dot.style.background = hex;
+        dot.onclick = () => applyColor(hex);
+      }
+    };
+    renderPalette();
+
+    // 保存颜色模版：把当前节点的颜色存进调色板
+    const saveColorBtn = tuneRow.createEl("button", {
+      cls: "cp-tb-btn cp-tb-savecolor",
+      attr: { title: "保存当前颜色到调色板", "aria-label": "保存颜色" },
+    });
+    saveColorBtn.textContent = "＋";
+    saveColorBtn.onclick = () => {
+      const col = String(firstData().color ?? "");
+      if (/^#[0-9a-fA-F]{3,8}$/.test(col)) {
+        this.saveColor?.(col);
+        renderPalette();
+        new Notice(`已保存 ${col}`);
+      } else {
+        new Notice("当前节点没有可保存的自定义颜色（先用色轮/色条选色）");
+      }
+    };
+
+    // 色条：色相条拖动（松手时写入，避免拖动中频繁 setData 重建 DOM）
+    const hue = tuneRow.createEl("input", {
+      cls: "cp-tb-hue",
+      attr: { type: "range", min: "0", max: "359", step: "1", value: "210", title: "色条：拖动调色相", "aria-label": "色条" },
+    });
+    hue.addEventListener("change", () => {
+      applyColor(hslToHex(parseInt(hue.value, 10), 0.85, 0.55));
+    });
+
+    el.createDiv({ cls: "cp-tb-divider" });
+
+    // —— 字号：滑杆 + 实时倍率徽章（点徽章复位 1.00×）——
+    const sizeGroup2 = tuneRow.createDiv({ cls: "cp-tb-sizegrp" });
+    sizeGroup2.createSpan({ cls: "cp-tb-size-cap", text: "字号" });
+    const scale = sizeGroup2.createEl("input", {
+      cls: "cp-tb-scale",
+      attr: { type: "range", min: "0.6", max: "2.4", step: "0.05", value: "1", title: "字号无级调节", "aria-label": "字号" },
+    });
+    const badge = sizeGroup2.createEl("button", {
+      cls: "cp-tb-scale-chip",
+      attr: { title: "点击复位为 1.00×", "aria-label": "字号倍率" },
+    });
+    const fmt = (v: number) => `${v.toFixed(2)}×`;
+    const curScale = firstData().cpTextScale;
+    if (typeof curScale === "number" && curScale > 0) scale.value = String(curScale);
+    badge.textContent = fmt(parseFloat(scale.value));
+    const applyScale = async (v: number) => {
+      const { setTextScale } = await import("./node-styles");
+      for (const n of nodes) setTextScale(n, v === 1 ? undefined : v);
+      badge.textContent = fmt(v);
+    };
+    scale.addEventListener("change", () => applyScale(parseFloat(scale.value)));
+    scale.addEventListener("input", () => {
+      badge.textContent = fmt(parseFloat(scale.value));
+    });
+    badge.onclick = () => {
+      scale.value = "1";
+      applyScale(1);
+    };
+
+    el.createDiv({ cls: "cp-tb-divider" });
+
+    // —— 尺寸快捷调整（拖拽手柄不可用时的保底：一键加宽/加高）——
+    const sizeAdj = tuneRow.createDiv({ cls: "cp-tb-group" });
+    for (const a of [
+      { t: "↔+", dw: 60, dh: 0, tt: "加宽 60px" },
+      { t: "↔-", dw: -60, dh: 0, tt: "减窄 60px" },
+      { t: "↕+", dw: 0, dh: 40, tt: "加高 40px" },
+      { t: "↕-", dw: 0, dh: -40, tt: "减矮 40px" },
+    ]) {
+      const b = sizeAdj.createEl("button", {
+        cls: "cp-tb-btn",
+        attr: { title: a.tt, "aria-label": a.tt },
+      });
+      b.textContent = a.t;
+      b.onclick = () => {
+        for (const n of nodes) {
+          try {
+            const d = (n as any).getData?.() ?? {};
+            const w = Math.max(80, (d.width ?? (n as any).width ?? 200) + a.dw);
+            const h = Math.max(40, (d.height ?? (n as any).height ?? 100) + a.dh);
+            (n as any).setData?.({ ...d, width: w, height: h });
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        this.currentCanvas?.requestSave?.();
+      };
+    }
+
+    el.createDiv({ cls: "cp-tb-divider" });
+
+    // —— 连线模式（不依赖悬停圆点，远程/触屏等丢 hover 的环境也能连线）——
+    // 点它后进入连线模式，再点目标节点即建箭头连线，Esc 取消
+    const linkBtn = el.createEl("button", {
+      cls: "cp-tb-btn",
+      attr: { title: "连线：点后选来源，再点目标节点", "aria-label": "连线" },
+    });
+    linkBtn.textContent = "🔗";
+    linkBtn.onclick = () => {
+      if (nodes.length === 0) return;
+      this.enterLinkMode(nodes[0]);
+    };
+
+    el.createDiv({ cls: "cp-tb-divider" });
+
     // —— Mindo 卡片样式：一键循环 无 → 标题卡 → 无标题卡 ——
     const curMode = String(firstData().styleAttributes?.mindo ?? "");
     const styleBtn = el.createEl("button", {
@@ -356,156 +350,73 @@ export class FloatingToolbar {
       this.show(nodes);
     };
 
-    // 色条：色相条拖动（松手时写入，避免拖动中频繁 setData 重建 DOM）
-    const hue = cpRow.createEl("input", {
-      cls: "cp-tb-hue",
-      attr: { type: "range", min: "0", max: "359", step: "1", value: "210", title: "色条：拖动调色相", "aria-label": "色条" },
+    // —— 切换纯文字 / 卡片 ——
+    const plainBtn = el.createEl("button", {
+      cls: "cp-tb-btn cp-plain-btn",
+      attr: { title: "切换纯文字（无边框）/ 卡片样式", "aria-label": "切换纯文字/卡片" },
     });
-    hue.addEventListener("change", () => {
-      applyColor(hslToHex(parseInt(hue.value, 10), 0.85, 0.55));
-    });
-    // —— 尺寸快捷调整（拖拽手柄不可用时的保底：一键加宽/加高）——
-    const sizeAdj = cpRow.createDiv({ cls: "cp-tb-group" });
-    for (const a of [
-      { t: "↔+", dw: 60, dh: 0, tt: "加宽 60px" },
-      { t: "↔-", dw: -60, dh: 0, tt: "减窄 60px" },
-      { t: "↕+", dw: 0, dh: 40, tt: "加高 40px" },
-      { t: "↕-", dw: 0, dh: -40, tt: "减矮 40px" },
-    ]) {
-      const b = sizeAdj.createEl("button", {
-        cls: "cp-tb-btn",
-        attr: { title: a.tt, "aria-label": a.tt },
-      });
-      b.textContent = a.t;
-      b.onclick = () => {
-        for (const n of nodes) {
-          try {
-            const d = (n as any).getData?.() ?? {};
-            const w = Math.max(80, (d.width ?? (n as any).width ?? 200) + a.dw);
-            const h = Math.max(40, (d.height ?? (n as any).height ?? 100) + a.dh);
-            (n as any).setData?.({ ...d, width: w, height: h });
-          } catch (e) {
-            console.error(e);
-          }
-        }
-        this.currentCanvas?.requestSave?.();
-      };
-    }
-
-    el.createDiv({ cls: "cp-tb-divider" });
-
-    // —— 连线模式（不依赖悬停圆点，远程/触屏等丢 hover 的环境也能连线）——
-    // 点它后进入连线模式，再点目标节点即建箭头连线，Esc 取消
-    const linkBtn = el.createEl("button", {
-      cls: "cp-tb-btn",
-      attr: { title: "连线：点后选来源，再点目标节点", "aria-label": "连线" },
-    });
-    linkBtn.textContent = "🔗";
-    linkBtn.onclick = () => {
-      if (nodes.length === 0) return;
-      this.enterLinkMode(nodes[0]);
+    plainBtn.textContent = "T̄";
+    plainBtn.onclick = async () => {
+      const { togglePlain } = await import("./plain-text");
+      for (const n of nodes) togglePlain(n);
+      this.hide();
     };
 
     el.createDiv({ cls: "cp-tb-divider" });
 
-    // -- 样式 --
-    const styleRow = makeGroup("样式");
-    btn(styleRow, "T̄", "切换纯文字/卡片", async () => {
-      const { togglePlain } = await import("./plain-text");
-      for (const n of nodes) togglePlain(n);
-      this.hide();
-    });
-    btn(styleRow, "📋", "转便签（黄）", async () => {
-      const { setSticky } = await import("./node-styles");
-      for (const n of nodes) setSticky(n, "yellow");
-      this.hide();
-    });
-
-    // -- 形状 --
-    const shapeRow = makeGroup("形状");
+    // —— 形状（圆角/椭圆/菱形） ——
+    const shapeGroup = el.createDiv({ cls: "cp-tb-group" });
     for (const shape of [
-      { icon: "▭", value: undefined, title: "矩形" },
+      { icon: "▭", value: undefined, title: "矩形（默认）" },
       { icon: "▢", value: "rounded" as const, title: "圆角" },
       { icon: "○", value: "ellipse" as const, title: "椭圆" },
       { icon: "◇", value: "diamond" as const, title: "菱形" },
     ]) {
-      btn(shapeRow, shape.icon, shape.title, async () => {
+      const btn = shapeGroup.createEl("button", {
+        cls: "cp-tb-btn cp-shape-btn",
+        attr: { title: shape.title, "aria-label": shape.title },
+      });
+      btn.textContent = shape.icon;
+      btn.onclick = async () => {
         const { setShape } = await import("./node-styles");
         for (const n of nodes) setShape(n, shape.value);
         this.hide();
-      });
-    }
-
-    // -- 我的模版（应用已存模版）--
-    {
-      const { extractNodeStyle, applyTemplateToNode } = await import("./node-styles");
-      const tpls: any[] = this.plugin?.settings?.styleTemplates || [];
-      // 有模版才显示应用组
-      if (tpls.length > 0) {
-        const applyRow = makeGroup("我的模版");
-        const select = applyRow.createEl("select", { cls: "cp-tb-tpl-select" });
-        select.style.maxWidth = "140px";
-        select.style.fontSize = "12px";
-        select.createEl("option", { text: "选择模版应用…", value: "" });
-        for (let i = 0; i < tpls.length; i++) {
-          select.createEl("option", { text: tpls[i].name, value: String(i) });
-        }
-        select.onchange = async () => {
-          const idx = parseInt(select.value, 10);
-          if (isNaN(idx)) return;
-          for (const n of nodes) applyTemplateToNode(n, tpls[idx]);
-          select.value = "";
-        };
-      }
-
-      // 存模版：单独一组，文字按钮明确
-      const saveTplRow = makeGroup("保存当前样式");
-      const saveTplBtn = saveTplRow.createEl("button", {
-        cls: "cp-tb-btn",
-        attr: { title: "把当前节点的完整样式（颜色+字号+形状）存为模版", "aria-label": "存为模版" },
-      });
-      saveTplBtn.textContent = "★ 存为样式模版";
-      saveTplBtn.style.fontSize = "12px";
-      saveTplBtn.style.color = "var(--color-yellow)";
-      saveTplBtn.onclick = async () => {
-        if (!this.plugin) return;
-        const style = extractNodeStyle(nodes[0]);
-        const name = window.prompt("给这个样式模版起个名字：", this.guessTemplateName(style));
-        if (!name) return;
-        this.plugin.settings.styleTemplates = this.plugin.settings.styleTemplates || [];
-        this.plugin.settings.styleTemplates.push({ name, ...style });
-        await this.plugin.saveSettings();
-        new Notice(`已保存模版「${name}」`);
-        this.onSelectionChanged(this.currentCanvas);
       };
     }
 
-    // -- 对齐（多选时才有意义） --
-    if (nodes.length >= 2) {
-      const alignRow = makeGroup("对齐");
-      const aligns = [
-        { icon: "⇤", title: "左对齐", fn: () => this.alignLeft(nodes) },
-        { icon: "↔", title: "水平居中", fn: () => this.alignHCenter(nodes) },
-        { icon: "⇥", title: "右对齐", fn: () => this.alignRight(nodes) },
-        { icon: "⇧", title: "顶对齐", fn: () => this.alignTop(nodes) },
-        { icon: "↕", title: "垂直居中", fn: () => this.alignVCenter(nodes) },
-        { icon: "⇩", title: "底对齐", fn: () => this.alignBottom(nodes) },
-      ];
-      for (const a of aligns) btn(alignRow, a.icon, a.title, a.fn);
-      const distRow = makeGroup("分布");
-      btn(distRow, "⥆", "水平等距", () => this.distributeH(nodes));
-      btn(distRow, "⇅", "垂直等距", () => this.distributeV(nodes));
-    }
-
-    // -- 删除 --
-    const delRow = makeGroup("");
-    const delBtn = btn(delRow, "🗑", "删除选中", () => {
-      for (const n of nodes) { try { (n.canvas as any)?.removeNode?.(n); } catch (e) { console.error(e); } }
-      this.hide();
+    // —— 便签 ——
+    const stickyGroup = el.createDiv({ cls: "cp-tb-group" });
+    const stickyBtn = stickyGroup.createEl("button", {
+      cls: "cp-tb-btn cp-sticky-btn",
+      attr: { title: "转便签（黄）", "aria-label": "便签" },
     });
-    delBtn.classList.add("cp-delete-btn");
+    stickyBtn.textContent = "📋";
+    stickyBtn.onclick = async () => {
+      const { setSticky } = await import("./node-styles");
+      for (const n of nodes) setSticky(n, "yellow");
+      this.hide();
+    };
 
-    // -- 定位 --
+    el.createDiv({ cls: "cp-tb-divider" });
+
+    // —— 删除 ——
+    const delBtn = el.createEl("button", {
+      cls: "cp-tb-btn cp-delete-btn",
+      attr: { title: "删除选中", "aria-label": "删除选中" },
+    });
+    delBtn.textContent = "🗑";
+    delBtn.onclick = () => {
+      for (const n of nodes) {
+        try {
+          (n.canvas as any)?.removeNode?.(n);
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      this.hide();
+    };
+
+    // —— 定位 ——
     this.position(nodes);
   }
 
@@ -714,8 +625,8 @@ export class FloatingToolbar {
       this.hide();
       return;
     }
-    const tbRect = this.el.getBoundingClientRect();
     const width = maxX - minX;
+    const tbRect = this.el.getBoundingClientRect();
     const left = minX + width / 2 - tbRect.width / 2;
     // 与节点保持 16px 间距：节点四边中点的连接点（拉出连线的小圆点）
     // 贴边缘内侧放置，16px 间距保证工具条不盖住它们
