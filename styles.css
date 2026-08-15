@@ -126,7 +126,8 @@
  * ============================================================ */
 .cp-slash-popup {
   position: fixed;
-  z-index: var(--layer-menu, 100);
+  /* 分层：节点工具栏 100 < 格式工具栏 110 < 斜杠菜单 120（输入弹层最高） */
+  z-index: calc(var(--layer-menu, 100) + 20);
   width: 260px;
   max-height: 320px;
   overflow-y: auto;
@@ -238,7 +239,8 @@
 /* 富文本工具条（选中文本片段时弹出） */
 .cp-text-format-toolbar {
   position: fixed;
-  z-index: var(--layer-menu, 100);
+  /* 分层：节点工具栏 100 < 格式工具栏 110 < 斜杠菜单 120 */
+  z-index: calc(var(--layer-menu, 100) + 10);
   display: flex;
   align-items: center;
   gap: 2px;
@@ -261,6 +263,89 @@
 }
 .cp-tf-btn:hover {
   background: var(--background-modifier-hover);
+}
+
+/* —— 富文本工具条扩展控件（色轮 / 色条 / 字号滑杆）—— */
+/* 窄屏时自动换成两行，避免工具条过宽 */
+.cp-text-format-toolbar {
+  flex-wrap: wrap;
+  max-width: 380px;
+}
+/* 色轮：系统取色器入口，渲染成圆形色块 */
+.cp-tf-color {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin: 3px;
+  border: none;
+  border-radius: 50%;
+  background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+  cursor: pointer;
+}
+.cp-tf-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+/* 色板透明，让外层 conic 渐变（色轮外观）透出来；
+   选中的颜色直接实时应用到文字上，不需要本地预览 */
+.cp-tf-color::-webkit-color-swatch {
+  opacity: 0;
+}
+/* 色条：色相渐变条，拖动连续取色 */
+.cp-tf-hue {
+  -webkit-appearance: none;
+  width: 72px;
+  height: 12px;
+  margin: 0 4px;
+  border-radius: 6px;
+  background: linear-gradient(
+    to right,
+    hsl(0, 85%, 55%),
+    hsl(60, 85%, 55%),
+    hsl(120, 85%, 55%),
+    hsl(180, 85%, 55%),
+    hsl(240, 85%, 55%),
+    hsl(300, 85%, 55%),
+    hsl(359, 85%, 55%)
+  );
+  cursor: pointer;
+}
+.cp-tf-hue::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--background-primary);
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+/* 字号滑杆 + 数值标签 */
+.cp-tf-size-label {
+  min-width: 42px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.cp-tf-size {
+  -webkit-appearance: none;
+  width: 72px;
+  height: 12px;
+  margin: 0 4px;
+  accent-color: var(--interactive-accent);
+  cursor: pointer;
+}
+.cp-tf-size::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--background-modifier-border);
+}
+.cp-tf-size::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  border: 1px solid var(--background-primary);
 }
 
 /* 字号缩放（CSS class 方式，同时作用于 nodeEl 和 CM6 编辑器 DOM） */
@@ -623,4 +708,420 @@
 .cp-quick-insert-btn svg {
   width: 20px;
   height: 20px;
+ * Mindo 色带卡片皮肤 —— 逐字复刻自 mindo-canvas 原版 styles.css
+ * 仅两处适配：① 标题选择器兼容新 DOM（h1 包在 .el-h1 里）
+ *           ② 色带/标题颜色加 --cp-band-color 兜底（预设色下 --canvas-color 为空）
+ * ============================================================ */
+
+/* ─── 卡片基础外观 ─── */
+.canvas-node[data-mindo="card"] .canvas-node-container {
+	border-radius: 12px !important;
+	border: none !important;
+	box-shadow:
+		0 10px 25px -5px rgba(0, 0, 0, 0.15),
+		0 8px 10px -6px rgba(0, 0, 0, 0.1),
+		0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+	/* 原版此处有 overflow:hidden，但在 Obsidian 1.13 会裁掉连接点
+	 * （拉出连线的小圆点），导致无法拖出箭头——去掉它；
+	 * 标题条自带顶部圆角，卡片观感不受影响 */
+	transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.canvas-node[data-mindo="card"]:hover .canvas-node-container {
+	box-shadow:
+		0 20px 25px -5px rgba(0, 0, 0, 0.2),
+		0 10px 10px -6px rgba(0, 0, 0, 0.12),
+		0 0 0 1px rgba(0, 0, 0, 0.08) !important;
+}
+.canvas-node[data-mindo="card"].is-selected .canvas-node-container {
+	box-shadow:
+		0 0 0 2px var(--interactive-accent, #3b82f6),
+		0 10px 25px -5px rgba(0, 0, 0, 0.18) !important;
+}
+/* ─── 色带标题条（无 h1 时显示 6px 色带）─── */
+.canvas-node[data-mindo="card"] .canvas-node-container::before {
+	content: "";
+	position: absolute;
+	top: 0; left: 0; right: 0;
+	height: 6px;
+	background: var(--cp-band-color, var(--canvas-color, var(--color-accent, #6366f1)));
+	z-index: 1;
+	pointer-events: none;
+}
+/* ─── 标题区 + 正文区（照 Mindo 原版：彩色标题头 + 透明正文）───
+ * Mindo 原版 .mindo-node-header：实色背景、白字、粗体、居中、
+ * padding 0.75rem、min-height 2.5rem、顶部圆角；
+ * 正文 .mindo-node-content：透明底、padding 0.75rem、0.875rem 字号。
+ */
+.canvas-node[data-mindo="card"] .markdown-preview-view > h1:first-child,
+.canvas-node[data-mindo="card"] .markdown-embed-content > .markdown-preview-view > h1:first-child,
+.canvas-node[data-mindo="card"] .markdown-preview-sizer > .el-h1 > h1 {
+	background: var(--cp-band-color, var(--canvas-color, var(--color-accent, #6366f1)));
+	color: #fff !important;
+	margin: 0 !important;
+	padding: 0.75rem !important;
+	border-radius: 12px 12px 0 0;
+	font-size: 1rem;
+	font-weight: 700;
+	text-align: center;
+	min-height: 2.5rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-bottom: none;
+}
+/* 标题头的包裹层同样贴满（消除默认段边距） */
+.canvas-node[data-mindo="card"] .markdown-preview-sizer > .el-h1 {
+	margin: 0;
+}
+/* 有标题时隐藏 6px 色带，让标题头接管 */
+.canvas-node[data-mindo="card"]:has(.markdown-preview-view h1) .canvas-node-container::before {
+	display: none;
+}
+/* 正文区（Mindo .mindo-node-content）：透明底 + 12px 内边距 */
+.canvas-node[data-mindo="card"] .markdown-preview-view {
+	padding: 0;
+}
+.canvas-node[data-mindo="card"] .markdown-preview-sizer > *:not(.el-h1) {
+	padding-left: 0.75rem;
+	padding-right: 0.75rem;
+}
+.canvas-node[data-mindo="card"] .markdown-preview-sizer {
+	padding-bottom: 0.75rem;
+}
+/* 暗色模式微调 */
+.theme-dark .canvas-node[data-mindo="card"] .canvas-node-container {
+	box-shadow:
+		0 10px 25px -5px rgba(0, 0, 0, 0.5),
+		0 8px 10px -6px rgba(0, 0, 0, 0.4),
+		0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+}
+.theme-dark .canvas-node[data-mindo="card"]:hover .canvas-node-container {
+	box-shadow:
+		0 20px 25px -5px rgba(0, 0, 0, 0.6),
+		0 10px 10px -6px rgba(0, 0, 0, 0.5),
+		0 0 0 1px rgba(255, 255, 255, 0.12) !important;
+}
+/* 内容区字体 */
+.canvas-node[data-mindo="card"] .canvas-node-container .markdown-embed-content,
+.canvas-node[data-mindo="card"] .canvas-node-container .markdown-preview-view {
+	font-size: 0.9em;
+	line-height: 1.6;
+}
+
+/* ============================================================
+ * 下边缘连接点修复：悬停时把节点抬到最上层（覆盖 Obsidian 内联 z-index），
+ * 否则下方相邻卡片压住本节点下边缘的连接点，导致"下面拖不出线"。
+ * ============================================================ */
+.canvas-node:hover {
+	z-index: 9999 !important;
+}
+.canvas-node-resizer,
+.canvas-node-connection-point {
+	z-index: 20;
+}
+
+/* ============================================================
+ * Mindo 卡片（DOM 复刻版）—— 逐条取自 Mindo 原版
+ * .mindo-node-header / .mindo-node-content 的样式值
+ * ============================================================ */
+.cp-mindo-header {
+  padding: 0.75rem;
+  border-top-left-radius: 0.75rem;
+  border-top-right-radius: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  color: #ffffff;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+/* 正文：透明底，padding .75rem，0.875rem，行高 1.625 */
+.cp-mindo-band {
+  height: 6px;
+  flex: none;
+  width: 100%;
+}
+/* 关键：卡片组件不接收指针事件。否则它会盖住节点、拦截 hover，
+ * Obsidian 检测不到悬停 → 连接点不生成 → 无法拉出连线。
+ * 未聚焦节点的点击本就由原生 content-blocker 接管，组件无需交互；
+ * 编辑态组件本来就隐藏，不受影响。 */
+.cp-mindo-widget,
+.cp-mindo-widget * {
+  pointer-events: none;
+}
+/* 保存的颜色（调色板）：小色块一键套用 */
+.cp-tb-palette {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.cp-tb-swatch {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  padding: 0;
+}
+.cp-tb-swatch:hover {
+  transform: scale(1.15);
+}
+
+/* ============================================================
+ * 节点工具栏：无级调节行（色轮 / 色条 / 字号滑杆 / 调色板）
+ * ============================================================ */
+.cp-floating-toolbar {
+  flex-wrap: wrap;
+  max-width: 680px;
+}
+.cp-tb-tune {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* —— 色轮：彩虹圆轮，点击打开系统取色器 —— */
+.cp-tb-wheel {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  padding: 0;
+  margin: 0;
+  border: 2px solid var(--background-primary);
+  border-radius: 50%;
+  background: conic-gradient(
+    from 90deg,
+    #ff0000, #ff8000, #ffff00, #80ff00, #00ff00, #00ff80,
+    #00ffff, #0080ff, #0000ff, #8000ff, #ff00ff, #ff0080, #ff0000
+  );
+  box-shadow:
+    0 0 0 1px var(--background-modifier-border),
+    0 2px 6px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+.cp-tb-wheel:hover {
+  transform: scale(1.12);
+}
+.cp-tb-wheel::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.cp-tb-wheel::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+  opacity: 0;
+}
+/* —— 色条：平滑色相渐变 —— */
+.cp-tb-hue {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 88px;
+  height: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: linear-gradient(
+    to right,
+    hsl(0, 85%, 55%),
+    hsl(30, 85%, 55%),
+    hsl(60, 85%, 55%),
+    hsl(90, 85%, 55%),
+    hsl(120, 85%, 55%),
+    hsl(150, 85%, 55%),
+    hsl(180, 85%, 55%),
+    hsl(210, 85%, 55%),
+    hsl(240, 85%, 55%),
+    hsl(270, 85%, 55%),
+    hsl(300, 85%, 55%),
+    hsl(330, 85%, 55%),
+    hsl(360, 85%, 55%)
+  );
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+.cp-tb-hue::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--background-primary);
+  border: 2px solid var(--background-modifier-border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+/* —— 字号滑杆 —— */
+.cp-tb-scale-label {
+  min-width: 40px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.cp-tb-scale {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 16px;
+  accent-color: var(--interactive-accent);
+  cursor: pointer;
+}
+.cp-tb-scale::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+}
+.cp-tb-scale::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+  border: 2px solid var(--background-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* 保存颜色按钮 + 字号组（滑杆 + 倍率徽章） */
+.cp-tb-savecolor {
+  min-width: 22px;
+  height: 22px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+.cp-tb-sizegrp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cp-tb-size-cap {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.cp-tb-scale-chip {
+  min-width: 44px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  border-radius: 10px;
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+.cp-tb-scale-chip:hover {
+  background: var(--background-modifier-border);
+}
+/* Mindo 样式切换按钮：突出一点方便点击 */
+.cp-tb-stylebtn {
+  font-size: 15px;
+}
+
+/* ============================================================
+ * Mindo 卡片（原生渲染版）：组件只画标题头/色带，正文=原生预览
+ * ============================================================ */
+.cp-mindo-widget {
+  width: 100%;
+  pointer-events: none;
+}
+/* 标题头：Mindo 原版 .mindo-node-header */
+.cp-mindo-header {
+  padding: 0.75rem;
+  border-top-left-radius: 0.75rem;
+  border-top-right-radius: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  color: #ffffff;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+/* 无标题卡色带 */
+.cp-mindo-band {
+  height: 6px;
+  width: 100%;
+}
+/* ============================================================
+ * Mindo 卡片（组件渲染版）：标题头 + 正文（官方 Markdown 渲染）
+ * ============================================================ */
+.cp-mindo-widget {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--background-primary);
+  border-radius: 12px;
+  overflow: hidden;
+  z-index: 5;
+  pointer-events: none;
+}
+.theme-dark .cp-mindo-widget {
+  background-color: var(--background-secondary, #1f2937);
+}
+/* 标题头：Mindo 原版 .mindo-node-header */
+.cp-mindo-header {
+  padding: 0.75rem;
+  border-top-left-radius: 0.75rem;
+  border-top-right-radius: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  color: #ffffff;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+/* 无标题卡色带 */
+.cp-mindo-band {
+  height: 6px;
+  flex: none;
+  width: 100%;
+}
+/* 正文：Mindo 原版 .mindo-node-content */
+.cp-mindo-body {
+  padding: 0.75rem;
+  border-bottom-left-radius: 0.75rem;
+  border-bottom-right-radius: 0.75rem;
+  flex-grow: 1;
+  font-size: 0.875rem;
+  line-height: 1.625;
+  color: var(--text-normal);
+  overflow-wrap: break-word;
+  word-break: break-word;
+  overflow-y: auto;
+}
+.theme-dark .cp-mindo-body {
+  color: var(--text-normal, #d1d5db);
+}
+/* 正文 Markdown 元素边距收敛 */
+.cp-mindo-body > p,
+.cp-mindo-body > ul,
+.cp-mindo-body > ol {
+  margin-block: 0.35em;
+}
+.cp-mindo-body > :first-child { margin-top: 0; }
+.cp-mindo-body > :last-child { margin-bottom: 0; }
+/* 正文对齐：按卡可选（cpAlign="center" 时居中） */
+.cp-mindo-body.cp-mindo-center {
+  text-align: center;
+}
+.cp-mindo-body.cp-mindo-center p,
+.cp-mindo-body.cp-mindo-center ul, .cp-mindo-body.cp-mindo-center ol,
+.cp-mindo-body.cp-mindo-center li {
+  text-align: center;
+}
+.cp-mindo-body.cp-mindo-center ul, .cp-mindo-body.cp-mindo-center ol {
+  list-style-position: inside;
+  padding-inline-start: 0;
 }

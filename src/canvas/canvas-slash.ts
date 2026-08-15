@@ -35,6 +35,9 @@ export function setupCanvasSlash(plugin: Plugin): () => void {
   // 全局 keydown 处理弹窗导航（仅在弹窗打开时）
   const onGlobalKeydown = (e: KeyboardEvent) => {
     if (!activePopup) return;
+    // 编辑器已失焦时不吞键：失焦后弹窗有 200ms 延迟关闭窗口，
+    // 若继续拦截会把用户在其他界面按的 Enter/Esc 吃掉
+    if (activeCm && typeof activeCm.hasFocus === "function" && !activeCm.hasFocus()) return;
     if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); selectItem(activeIndex + 1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); selectItem(activeIndex - 1); }
     else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); confirmItem(); }
@@ -44,13 +47,14 @@ export function setupCanvasSlash(plugin: Plugin): () => void {
   uninstallers.push(() => document.removeEventListener("keydown", onGlobalKeydown, true));
 
   const attach = () => {
-    const leaves = plugin.app.workspace.getLeavesOfType("canvas");
-    if (!leaves.length) return;
-    const canvas = (leaves[0] as any).view?.canvas;
-    if (!canvas?.nodes) return;
-    for (const node of canvas.nodes.values()) {
-      const cm = node?.child?.editMode?.cm;
-      if (cm) injectOne(cm);
+    // 遍历全部画布叶子：多画布并存时每个画布的节点都注入
+    for (const leaf of plugin.app.workspace.getLeavesOfType("canvas")) {
+      const canvas = (leaf as any).view?.canvas;
+      if (!canvas?.nodes) continue;
+      for (const node of canvas.nodes.values()) {
+        const cm = node?.child?.editMode?.cm;
+        if (cm) injectOne(cm);
+      }
     }
   };
 

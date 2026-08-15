@@ -32,12 +32,13 @@ export function setupTimerNodes(plugin: Plugin): () => void {
 }
 
 function renderTimers(app: App) {
-  const leaves = app.workspace.getLeavesOfType("canvas");
-  if (!leaves.length) return;
-  const canvas = (leaves[0] as any).view?.canvas;
-  if (!canvas?.nodes) return;
-  for (const node of canvas.nodes.values()) {
-    renderOne(node);
+  // 遍历全部画布叶子：多画布并存时每个画布的计时器节点都渲染
+  for (const leaf of app.workspace.getLeavesOfType("canvas")) {
+    const canvas = (leaf as any).view?.canvas;
+    if (!canvas?.nodes) continue;
+    for (const node of canvas.nodes.values()) {
+      renderOne(node);
+    }
   }
 }
 
@@ -45,19 +46,6 @@ function renderOne(node: CanvasNode) {
   const data = node.getData() as any;
   const text: string = data?.text ?? "";
   const contentEl = (node as any).contentEl as HTMLElement | undefined;
-  // 调试：若节点文本含标记，打印状态
-  if ((COUNTDOWN_RE.test(text) || TIMER_RE.test(text))) {
-    console.log("[cp-timer] renderOne check:", {
-      nodeId: data?.id,
-      type: data?.type,
-      hasText: !!text,
-      textPreview: text.slice(0, 60),
-      isCountdown: COUNTDOWN_RE.test(text),
-      isTimer: TIMER_RE.test(text),
-      hasContentEl: !!contentEl,
-      contentElChildren: contentEl?.children?.length,
-    });
-  }
   if (!data || data.type !== "text") return;
   if (!contentEl) return;
 
@@ -66,17 +54,25 @@ function renderOne(node: CanvasNode) {
 
   if (!cdMatch && !isTimer) return;
 
-  // 清理旧渲染（若文本变了，重建）
-  const existing = contentEl.querySelector(".cp-timer-widget");
+  // 清理旧渲染（若文本变了，重建）。重建前必须清掉旧 widget 的
+  // interval，否则旧定时器永远空转（秒表是 100ms 一跳）
+  const existing = contentEl.querySelector(".cp-timer-widget") as HTMLElement | null;
   if (existing) {
     // 若已渲染且标记没变，跳过
     if (rendered.has(contentEl) && existing.getAttribute("data-key") === text) return;
+    const olds: number[] = (existing as any).__cpIntervals ?? [];
+    for (const t of olds) {
+      clearInterval(t);
+      timers.delete(t);
+    }
     existing.remove();
   }
   rendered.add(contentEl);
 
   const widget = contentEl.createDiv({ cls: "cp-timer-widget" });
   widget.setAttribute("data-key", text);
+  const widgetIntervals: number[] = [];
+  (widget as any).__cpIntervals = widgetIntervals;
   const label = widget.createDiv({ cls: "cp-timer-label" });
   const value = widget.createDiv({ cls: "cp-timer-value" });
 
@@ -102,6 +98,7 @@ function renderOne(node: CanvasNode) {
     };
     update();
     const t = window.setInterval(update, 1000);
+    widgetIntervals.push(t);
     timers.add(t);
   } else if (isTimer) {
     label.textContent = "秒表";
@@ -127,6 +124,7 @@ function renderOne(node: CanvasNode) {
       }
     }, 100);
     timers.add(tick);
+    widgetIntervals.push(tick);
     toggleBtn.onclick = () => {
       running = !running;
       if (running) {

@@ -27,6 +27,14 @@ const ICONS: Record<string, string> = {
 /** 保存右键位置（画布坐标），供插入节点使用 */
 let lastContextMenuPos: { x: number; y: number } = { x: 0, y: 0 };
 
+/** 当前存活的子菜单（挂在 body 上），原生菜单关闭时统一清理 */
+const liveSubmenus = new Set<HTMLElement>();
+
+function cleanupSubmenus(): void {
+  for (const s of liveSubmenus) s.remove();
+  liveSubmenus.clear();
+}
+
 /**
  * 常驻「+」浮动按钮（不依赖右键事件，100% 可靠）
  *
@@ -277,6 +285,21 @@ function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
   if (diagnoseActive) {
     new Notice(`诊断：找到菜单 class=${diagnoseMenuClasses.join(",")}`, 8000);
   }
+
+  // 原生菜单从 DOM 移除（关闭）时，同步清掉挂在 body 上的子菜单，
+  // 否则子菜单会变成幽灵层悬在屏幕上拦截点击。
+  // 延迟必须够长：原生菜单在"按下菜单外区域"时即关闭移除（子菜单在
+  // 菜单外），真实点击的 mouseup/click 在按下后 100-300ms 才发生——
+  // 清理早于这个时间会把子菜单项从 DOM 摘掉，click 落空（点了没反应）
+  const menuWatch = new MutationObserver(() => {
+    if (!document.body.contains(menuEl)) {
+      menuWatch.disconnect();
+      setTimeout(() => {
+        if (!document.body.contains(menuEl)) cleanupSubmenus();
+      }, 400);
+    }
+  });
+  menuWatch.observe(document.body, { childList: true });
 
   // 点击菜单项后关闭整个菜单
   const closeMenu = () => {
@@ -634,9 +657,22 @@ function createSubmenu(parentItem: HTMLElement, items: Array<{ label: string; on
   sub.style.position = "fixed";
   sub.style.display = "none";
   sub.style.zIndex = "1000";
+  // 登记进存活列表，原生菜单关闭时由 cleanupSubmenus 统一移除
+  liveSubmenus.add(sub);
 
   for (const it of items) {
-    const el = createItem(it.label, "", it.onClick);
+    // 子菜单项用 pointerdown 激活：子菜单在原生菜单"外部"，按下它会让
+    // 原生菜单立刻关闭并触发清理，等 mouseup 的 click 可能已无 DOM 可落
+    const el = createItem(it.label, "", () => {});
+    el.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        it.onClick();
+      } catch (err) {
+        console.error("[canvas-plus] 子菜单动作失败", err);
+      }
+    });
     sub.appendChild(el);
   }
   document.body.appendChild(sub);

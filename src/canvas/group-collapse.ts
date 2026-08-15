@@ -12,9 +12,8 @@
 import { Notice } from "obsidian";
 import type { Canvas, CanvasNode, CanvasNodeData } from "../types/canvas-internal";
 import { addNodeData, genId } from "./canvas-access";
-import { applyAllStyles } from "./node-styles";
-
-const FLAG_COLLAPSED = "cpCollapsed";
+import { applyNodeStyle } from "./node-styles";
+import { FLAG_COLLAPSED } from "./layers";
 
 /** 打包分组：选中多个节点，创建一个 group 包裹它们 */
 export function groupSelection(canvas: Canvas): void {
@@ -80,8 +79,6 @@ export function toggleCollapseGroup(canvas: Canvas, groupNode: CanvasNode): void
     for (const child of children) {
       const cd = child.getData();
       (child as any).setData?.({ ...cd, [FLAG_COLLAPSED]: true });
-      const nodeEl = (child as any).nodeEl as HTMLElement | undefined;
-      nodeEl?.classList.add("cp-hidden");
     }
     (groupNode as any).setData?.({ ...data, [FLAG_COLLAPSED]: true });
     new Notice(`已折叠分组（${children.length} 个节点隐藏）`);
@@ -92,13 +89,15 @@ export function toggleCollapseGroup(canvas: Canvas, groupNode: CanvasNode): void
       const newData = { ...cd };
       delete newData[FLAG_COLLAPSED];
       (child as any).setData?.(newData);
-      const nodeEl = (child as any).nodeEl as HTMLElement | undefined;
-      nodeEl?.classList.remove("cp-hidden");
     }
     const newData = { ...data };
     delete newData[FLAG_COLLAPSED];
     (groupNode as any).setData?.(newData);
     new Notice(`已展开分组`);
   }
+  // 立即重刷样式（node-styles 的 200ms 轮询也会兜底再刷一次，
+  // applyLayerStyle 会按 cpCollapsed 标记回加 cp-hidden）
+  for (const child of children) applyNodeStyle(child);
+  applyNodeStyle(groupNode);
   canvas.requestSave();
 }

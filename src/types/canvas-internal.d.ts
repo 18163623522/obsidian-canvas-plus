@@ -46,6 +46,9 @@ export interface CanvasNode {
   child?: { editMode?: { cm?: any } };
 
   getData(): CanvasNodeData;
+  /** 改内容类字段（styleAttributes/color/尺寸/文本）时不要传 addHistory=false：
+   *  Obsidian 1.13.7 下节点卸载内容后不会重新挂载（isContentMounted 停滞为 false）。
+   *  纯 x/y 位移传 false 安全。 */
   setData(data: Partial<CanvasNodeData>, addHistory?: boolean): void;
   getBBox(): BBox;
   setColor(color: string): void;

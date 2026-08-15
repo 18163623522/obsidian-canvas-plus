@@ -47,17 +47,18 @@ export function setupNodeStyles(plugin: Plugin): () => void {
 }
 
 export function applyAllStyles(app: App): void {
-  const leaves = app.workspace.getLeavesOfType("canvas");
-  if (!leaves.length) return;
-  const canvas = (leaves[0] as any).view?.canvas;
-  if (!canvas?.nodes) return;
-  for (const node of canvas.nodes.values() as IterableIterator<CanvasNode>) {
-    applyNodeStyle(node);
-  }
-  // 边样式
-  if (canvas.edges) {
-    for (const edge of canvas.edges.values()) {
-      applyEdgeStyle(edge);
+  // 遍历全部画布叶子：多画布并存时每个画布的节点都要应用样式
+  for (const leaf of app.workspace.getLeavesOfType("canvas")) {
+    const canvas = (leaf as any).view?.canvas;
+    if (!canvas?.nodes) continue;
+    for (const node of canvas.nodes.values() as IterableIterator<CanvasNode>) {
+      applyNodeStyle(node);
+    }
+    // 边样式
+    if (canvas.edges) {
+      for (const edge of canvas.edges.values()) {
+        applyEdgeStyle(edge);
+      }
     }
   }
 }
@@ -209,15 +210,23 @@ export function applyNodeStyle(node: CanvasNode): void {
   const scale = data[FLAG_TEXT_SCALE];
   if (scale) targetClasses.add(`cp-scale-${String(scale).replace(".", "-")}`);
 
+  // Mindo 卡片判定：只认显式标记（右键"Mindo 卡片样式"/新建卡片命令/子节点）。
+  // 不按内容自动套用——保持普通 "# 标题" 节点为 Obsidian 原生外观。
+  const mindo = (data as any).styleAttributes?.mindo;
+  const targetMindo = mindo ? String(mindo) : null;
+
   const currentCp = Array.from(nodeEl.classList).filter((c) => c.startsWith("cp-"));
   const same =
     currentCp.length === targetClasses.size &&
-    currentCp.every((c) => targetClasses.has(c));
+    currentCp.every((c) => targetClasses.has(c)) &&
+    (nodeEl.getAttribute("data-mindo") ?? null) === targetMindo;
   if (same) {
     // class 一致：只做幂等注入（标题栏内部也有变化检测），不写 className
     if (data[FLAG_STYLE] === "title-card") injectTitleBar(node as any, nodeEl, data);
-    // 字号缩放的 DOM 层需要重设（Obsidian 重建内容 DOM 后丢失），保持轻量重设
+    // 字号缩放的 DOM 层需要重设（Obsidian 重建内容 DOM 后丢失），保持轻量重设；
+    // 无标记时主动清除内联——否则放大后复位，!important 内联残留，字号回不去
     if (scale) applyTextScaleDom(node, scale);
+    else clearTextScaleDom(node);
     // 图层和图标也要保持（可能被 Obsidian 重建覆盖）
     applyLayerStyle(node);
     applyIcon(node);
@@ -230,6 +239,29 @@ export function applyNodeStyle(node: CanvasNode): void {
   const newClassName = classes.join(" ");
   if (nodeEl.className !== newClassName) nodeEl.className = newClassName;
 
+  // Mindo 卡片：写 data-mindo + 解析色带颜色。
+  // --canvas-color 在部分预设色下解析为空字符串，导致色带背景整体失效
+  // （不可见）。这里把节点颜色解析成确定有效的色值写进 --cp-band-color，
+  // 皮肤 CSS 只依赖这个变量。
+  if (targetMindo) {
+    (nodeEl.dataset as any).mindo = targetMindo;
+    let band: string | null = null;
+    const rawColor: string | undefined = (data as any).color;
+    if (rawColor && /^#[0-9a-fA-F]{3,8}$/.test(rawColor)) {
+      band = rawColor;
+    } else if (rawColor !== undefined && rawColor >= "1" && rawColor <= "6") {
+      try {
+        const v = getComputedStyle(nodeEl).getPropertyValue("--canvas-color").trim();
+        if (v) band = v;
+      } catch {}
+    }
+    if (band) nodeEl.style.setProperty("--cp-band-color", band);
+    else nodeEl.style.removeProperty("--cp-band-color");
+  } else if (nodeEl.dataset.mindo !== undefined) {
+    delete (nodeEl.dataset as any).mindo;
+    nodeEl.style.removeProperty("--cp-band-color");
+  }
+
   // 标题卡片：DOM 注入标题栏 / 非标题卡片：清理残留
   if (data[FLAG_STYLE] === "title-card") {
     injectTitleBar(node as any, nodeEl, data);
@@ -238,6 +270,7 @@ export function applyNodeStyle(node: CanvasNode): void {
     if (staleBar) staleBar.remove();
   }
   if (scale) applyTextScaleDom(node, scale);
+  else clearTextScaleDom(node);
 
   // 图层样式（锁定/隐藏）
   applyLayerStyle(node);
@@ -257,10 +290,34 @@ function applyTextScaleDom(node: any, scale: number): void {
         t.style.setProperty("font-size", `${scale}em`, "important");
       }
     });
+    // Mindo 组件渲染层：正文/标题在自有 widget 里，原生预览的目标选择器够不到。
+    // widget 容器写 em（标题头继承父级，随之缩放）；正文有固定 0.875rem，按基准换算。
+    const widget = ce.querySelector(".cp-mindo-widget") as HTMLElement | null;
+    if (widget && widget.style.getPropertyValue("font-size") !== `${scale}em`) {
+      widget.style.setProperty("font-size", `${scale}em`, "important");
+    }
+    const mindoBodySize = `calc(0.875rem * ${scale})`;
+    ce.querySelectorAll(".cp-mindo-body").forEach((t: any) => {
+      if (t.style.getPropertyValue("font-size") !== mindoBodySize) {
+        t.style.setProperty("font-size", mindoBodySize, "important");
+      }
+    });
     const cmContent = node.child?.editMode?.cm?.dom?.querySelector?.(".cm-content") as HTMLElement | undefined;
     if (cmContent) cmContent.style.setProperty("font-size", `${scale}em`, "important");
   };
   setFontSize();
+}
+
+/** 清除字号缩放的内联残留（复位 1.00× 后调用，幂等） */
+function clearTextScaleDom(node: any): void {
+  const ce = node.contentEl as HTMLElement | undefined;
+  if (!ce) return;
+  const targets = ce.querySelectorAll(".markdown-preview-view, .markdown-preview-sizer, .markdown-embed-content, .cp-mindo-widget, .cp-mindo-body");
+  targets.forEach((t: any) => {
+    if (t.style.getPropertyValue("font-size")) t.style.removeProperty("font-size");
+  });
+  const cmContent = node.child?.editMode?.cm?.dom?.querySelector?.(".cm-content") as HTMLElement | undefined;
+  if (cmContent?.style.getPropertyValue("font-size")) cmContent.style.removeProperty("font-size");
 }
 
 // ============== 便捷 setter ==============

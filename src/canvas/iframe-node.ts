@@ -26,12 +26,13 @@ export function setupIframeNodes(plugin: Plugin): () => void {
 }
 
 function renderIframes(app: App) {
-  const leaves = app.workspace.getLeavesOfType("canvas");
-  if (!leaves.length) return;
-  const canvas = (leaves[0] as any).view?.canvas;
-  if (!canvas?.nodes) return;
-  for (const node of canvas.nodes.values()) {
-    renderOne(node);
+  // 遍历全部画布叶子：多画布并存时每个画布的伪节点都渲染
+  for (const leaf of app.workspace.getLeavesOfType("canvas")) {
+    const canvas = (leaf as any).view?.canvas;
+    if (!canvas?.nodes) continue;
+    for (const node of canvas.nodes.values()) {
+      renderOne(node);
+    }
   }
 }
 
@@ -114,13 +115,10 @@ export function createIframeNode(canvas: Canvas, url: string): void {
     width: 500,
     height: 400,
   });
-  // 延迟渲染
+  // 延迟渲染（直接在目标画布上渲染，多画布时不落错）
   setTimeout(() => {
-    const leaves = (canvas as any).view?.leaf?.app?.workspace?.getLeavesOfType?.("canvas") ?? [];
-    if (!leaves.length) return;
-    const c2 = (leaves[0] as any).view?.canvas;
-    if (!c2?.nodes) return;
-    for (const node of c2.nodes.values()) renderOne(node);
+    if (!canvas?.nodes) return;
+    for (const node of canvas.nodes.values()) renderOne(node);
   }, 300);
   new Notice("已插入网页嵌入节点");
 }

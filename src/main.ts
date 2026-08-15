@@ -7,7 +7,7 @@
 import { Plugin, Notice, Modal, Setting, Editor } from "obsidian";
 import type { Modifier } from "obsidian";
 import type { Canvas } from "./types/canvas-internal";
-import { getActiveCanvas, targetNodes, diagnoseCanvas } from "./canvas/canvas-access";
+import { getActiveCanvas, targetNodes, selectedNodes, diagnoseCanvas, createTextViaData } from "./canvas/canvas-access";
 import { applyLayout } from "./canvas/layout";
 import { generateCanvasFromNote } from "./canvas/markdown-to-canvas";
 import { exportCanvasToMarkdown } from "./canvas/canvas-to-markdown";
@@ -64,6 +64,20 @@ import { setupCommentNodes, createCommentNode } from "./canvas/comment-node";
 import { saveCurrentView, gotoView, deleteView } from "./canvas/view-bookmark";
 import { exportImage } from "./canvas/export-image";
 import { setupGuides, placeHorizontalGuide, placeVerticalGuide, clearGuides } from "./canvas/persistent-guides";
+import { runHealthCheck } from "./canvas/health-check";
+import { setupMindoCards } from "./canvas/mindo-card";
+import {
+  addChildNode as mindoAddChild,
+  addSiblingNode as mindoAddSibling,
+  autoMindoLayout,
+  toggleMindoStyle as mindoToggleStyle,
+  convertNodeToNote as mindoConvertToNote,
+  setupMindoMenu,
+  patchNodeCreation as mindoPatchNodeCreation,
+  resyncMindoDatasets,
+  markMindo,
+  type MindoOptions,
+} from "./canvas/mindo";
 import {
   CanvasPlusSettings,
   DEFAULT_SETTINGS,
@@ -73,7 +87,7 @@ import {
 export default class CanvasPlusPlugin extends Plugin {
   // Plugin 基类已有 settings（loadData/saveData 的承载对象），这里用 declare 收窄类型
   declare settings: CanvasPlusSettings;
-  slashMenu!: SlashMenuSuggest;
+  slashMenu?: SlashMenuSuggest;
   private toolbar!: FloatingToolbar;
   private uninstallSelectionPatch?: () => void;
   private uninstallCanvasSlash?: () => void;
@@ -88,20 +102,45 @@ export default class CanvasPlusPlugin extends Plugin {
   private uninstallAltDup?: () => void;
   private uninstallComments?: () => void;
   private uninstallGuides?: () => void;
-  private textFormatToolbar!: TextFormatToolbar;
+  private uninstallMindoPatch?: () => void;
+  private uninstallMindoCards?: () => void;
+  private textFormatToolbar?: TextFormatToolbar;
 
   async onload() {
-    // 启动日志写到文件，方便外部检查（不依赖 Console）
+    // 启动日志写到文件，方便外部检查（不依赖 Console）。
+    // 日志初始化单独隔离：vault 只读/被杀软锁定时降级为 no-op，
+    // 绝不让日志故障连带跳过全部功能注册
+    let write: (msg: string) => void = () => {};
     try {
       const fs = require("node:fs");
       const path = require("node:path");
       const logPath = path.join((this.app.vault.adapter as any).getBasePath?.() ?? "", ".obsidian", "plugins", "canvas-plus", "load.log");
-      const write = (msg: string) => {
-        const line = `[${new Date().toISOString()}] ${msg}\n`;
-        fs.appendFileSync(logPath, line);
+      write = (msg: string) => {
+        try {
+          fs.appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`);
+        } catch {}
       };
-      write("=== onload start ===");
+    } catch {
+      // 日志不可用，继续加载
+    }
+    try {
+      write(`=== onload start（版本 ${this.manifest.version}）===`);
       (this as any).__cpWriteLog = write;
+
+      // 运行时错误捕获：所有未处理异常写入 load.log（含其他插件抛出的，
+      // 用于定位多插件冲突），插件卸载时自动摘除
+      const onWinErr = (e: ErrorEvent) => {
+        try { write(`[error] ${e.message} @ ${e.filename}:${e.lineno}:${e.colno}\n${e.error?.stack ?? e.error ?? ""}`); } catch {}
+      };
+      const onRej = (e: PromiseRejectionEvent) => {
+        try { write(`[rejection] ${e.reason?.stack ?? String(e.reason ?? "")}`); } catch {}
+      };
+      window.addEventListener("error", onWinErr);
+      window.addEventListener("unhandledrejection", onRej);
+      this.register(() => {
+        window.removeEventListener("error", onWinErr);
+        window.removeEventListener("unhandledrejection", onRej);
+      });
 
       await this.loadSettings();
       setSnapEnabled(this.settings.smartSnap);
@@ -115,15 +154,13 @@ export default class CanvasPlusPlugin extends Plugin {
     this.registerEditorExtension(editorExtensions);
     this.registerMarkdownPostProcessor(readingViewFontsizeProcessor);
 
-    // ——————————————————————————————————————————————
-    //  编辑器扩展（字号等 CM6 扩展，作用于 MarkdownView）
-    // ——————————————————————————————————————————————
-    this.registerEditorExtension(editorExtensions);
-    this.registerMarkdownPostProcessor(readingViewFontsizeProcessor);
-
-    // 斜杠菜单（笔记内，EditorSuggest）
-    this.slashMenu = new SlashMenuSuggest(this.app);
-    this.registerEditorSuggest(this.slashMenu);
+    // 斜杠菜单（笔记内，EditorSuggest）——默认关闭：
+    // 笔记内的 "/" 菜单让位给 chinese-slash-format / slash-complete 等专门插件，
+    // 避免多个菜单同时弹出互相遮挡（设置里可重新打开）
+    if (this.settings.enableNoteSlashMenu) {
+      this.slashMenu = new SlashMenuSuggest(this.app);
+      this.registerEditorSuggest(this.slashMenu);
+    }
 
     this.registerEditorFontsizeCommands();
 
@@ -134,6 +171,7 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallSelectionPatch = patchCanvasSelection(this);
     // 2. 浮动工具条（选中节点时弹出）
     this.toolbar = new FloatingToolbar(this.app, this);
+    this.toolbar.positionMode = this.settings.toolbarPosition;
     this.registerEvent(
       this.app.workspace.on(SELECTION_CHANGED_EVENT as any, (canvas: any) => {
         this.toolbar.onSelectionChanged(canvas);
@@ -146,17 +184,28 @@ export default class CanvasPlusPlugin extends Plugin {
         if (leaves.length === 0) this.toolbar.hide();
       })
     );
-    // 3. 白板内 slash 菜单（注入到 node.child.editMode.cm）
-    this.uninstallCanvasSlash = setupCanvasSlash(this);
+    // 光标进入编辑器（如双击节点进编辑态）时隐藏工具条
+    this.registerDomEvent(document, "selectionchange", () => {
+      this.toolbar.onDocumentSelectionChange();
+    });
+    // 3. 白板内 slash 菜单（注入到 node.child.editMode.cm，可在设置关闭）
+    if (this.settings.enableCanvasSlashMenu) {
+      this.uninstallCanvasSlash = setupCanvasSlash(this);
+    }
     // 4. 纯文字节点样式轮询（给带 cpStyle=plain 标记的节点去边框）
     this.uninstallPlainStyle = setupPlainTextStyle(this);
-    // 5. 表格粘贴识别（白板 + 笔记，外部表格自动转 Markdown）
-    this.uninstallTablePaste = setupTablePaste(this);
+    // 5. 表格粘贴识别（白板 + 笔记，外部表格自动转 Markdown，可在设置关闭）
+    if (this.settings.enableTablePaste) {
+      this.uninstallTablePaste = setupTablePaste(this);
+    }
     // 6. 智能吸附辅助线（拖动节点时显示对齐线）
     this.uninstallSmartSnap = setupSmartSnap(this);
-    // 7. 富文本工具条（选中文本片段时弹出）
-    this.textFormatToolbar = new TextFormatToolbar();
-    this.register(() => this.textFormatToolbar.destroy());
+    // 7. 富文本工具条（选中文本片段时弹出，可在设置关闭）
+    if (this.settings.enableTextFormatToolbar) {
+      const tb = new TextFormatToolbar();
+      this.textFormatToolbar = tb;
+      this.register(() => tb.destroy());
+    }
     // 8. 图片拖拽入白板
     this.uninstallDrop = setupDropHandler(this);
     // 9. 倒计时/计时器伪节点渲染
@@ -175,6 +224,24 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallComments = setupCommentNodes(this);
     // 15. 持久参考线
     this.uninstallGuides = setupGuides(this);
+    // 16. Mindo 思维导图整合（子/兄弟节点、思维导图布局、卡片皮肤、
+    //     官方 canvas:node-menu / canvas:selection-menu 菜单项）
+    setupMindoMenu(this, () => this.mindoOptions());
+    this.uninstallMindoPatch = mindoPatchNodeCreation(
+      this.app,
+      () => this.settings.mindoMarkNewNodes
+    );
+    // 启动后回填一次现有 Mindo 卡片标记（重开画布后 DOM 是新建的，
+    // data-mindo 属性不会自动恢复）
+    this.app.workspace.onLayoutReady(() => {
+      for (const leaf of this.app.workspace.getLeavesOfType("canvas")) {
+        const canvas = (leaf as any).view?.canvas;
+        if (canvas?.nodes) resyncMindoDatasets(canvas);
+      }
+    });
+
+    // 17. Mindo 卡片 DOM 渲染（复刻 Mindo 原版标题头+正文结构）
+    this.uninstallMindoCards = setupMindoCards(this, () => this.settings.enableMindoCardWidget);
 
     // ——————————————————————————————————————————————
     //  纯文字节点命令
@@ -519,6 +586,146 @@ export default class CanvasPlusPlugin extends Plugin {
     });
 
     // ——————————————————————————————————————————————
+    //  Mindo 思维导图命令（整合自 obsidian-mindo-canvas）
+    // ——————————————————————————————————————————————
+    this.addCommand({
+      id: "mindo-add-child",
+      name: "Mindo：添加子节点",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        const node = selectedNodes(canvas)[0];
+        if (!node) return false;
+        if (checking) return true;
+        try {
+          mindoAddChild(canvas, node, this.mindoOptions());
+          new Notice("已添加子节点");
+        } catch (e: any) {
+          new Notice("添加子节点失败：" + (e?.message ?? e));
+        }
+      },
+    });
+    this.addCommand({
+      id: "mindo-add-sibling",
+      name: "Mindo：添加兄弟节点",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        const node = selectedNodes(canvas)[0];
+        if (!node) return false;
+        if (checking) return true;
+        try {
+          mindoAddSibling(canvas, node, this.mindoOptions());
+          new Notice("已添加兄弟节点");
+        } catch (e: any) {
+          new Notice("添加兄弟节点失败：" + (e?.message ?? e));
+        }
+      },
+    });
+    this.addCommand({
+      id: "mindo-auto-layout",
+      name: "Mindo：自动布局（思维导图）",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        const node = selectedNodes(canvas)[0];
+        if (!node) return false;
+        if (checking) return true;
+        try {
+          const n = autoMindoLayout(canvas, node.id, this.mindoOptions());
+          new Notice(`已整理 ${n} 个节点`);
+        } catch (e: any) {
+          new Notice("自动布局失败：" + (e?.message ?? e));
+        }
+      },
+    });
+    this.addCommand({
+      id: "mindo-toggle-style",
+      name: "Mindo：切换卡片样式",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        const nodes = selectedNodes(canvas);
+        if (nodes.length === 0) return false;
+        if (checking) return true;
+        const applied = mindoToggleStyle(canvas, nodes.map((n: any) => n.id));
+        new Notice(applied);
+      },
+    });
+    this.addCommand({
+      id: "mindo-new-card",
+      name: "Mindo：新建标题+正文卡片",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        const c = (canvas as any).posCenter?.() ?? { x: 0, y: 0 };
+        const id = createTextViaData(canvas, {
+          x: c.x - 150,
+          y: c.y - 100,
+          width: 300,
+          height: 180,
+          text: "# 标题\n\n在这里写正文…",
+        });
+        markMindo(canvas, [id], "card");
+        if (this.settings.mindoDefaultNodeColor) {
+          const node = canvas.nodes.get(id);
+          if (node) {
+            const d = node.getData();
+            (node as any).setData?.({ ...d, color: this.settings.mindoDefaultNodeColor });
+          }
+        }
+        canvas.requestSave();
+        new Notice("已创建标题+正文卡片");
+      },
+    });
+    this.addCommand({
+      id: "mindo-align-toggle",
+      name: "Mindo：切换正文对齐（左/居中）",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        const nodes = selectedNodes(canvas);
+        if (nodes.length === 0) return false;
+        if (checking) return true;
+        for (const n of nodes) {
+          try {
+            const d = (n as any).getData?.() ?? {};
+            const sa = { ...(d.styleAttributes ?? {}) };
+            const centered = sa.cpAlign === "center" || sa.textAlign === "center";
+            delete sa.cpAlign; // 统一收敛到原生 textAlign
+            if (centered) delete sa.textAlign;
+            else sa.textAlign = "center";
+            (n as any).setData?.({ ...d, styleAttributes: sa });
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        canvas.requestSave();
+        import("./canvas/mindo-card").then(({ refreshMindoCards }) => {
+          refreshMindoCards(nodes as any);
+          setTimeout(() => refreshMindoCards(nodes as any), 150);
+        });
+      },
+    });
+    this.addCommand({
+      id: "mindo-convert-to-note",
+      name: "Mindo：节点转成笔记",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        const node = selectedNodes(canvas)[0];
+        if (!node || node.getData?.()?.type !== "text") return false;
+        if (checking) return true;
+        mindoConvertToNote(canvas, this.app, node.id)
+          .then((path) => {
+            if (path) new Notice(`已转为笔记：${path}`);
+          })
+          .catch((e: any) => new Notice("转笔记失败：" + (e?.message ?? e)));
+      },
+    });
+
+    // ——————————————————————————————————————————————
     //  自动布局
     // ——————————————————————————————————————————————
     const layoutTypes = ["tree", "radial", "force", "dag"] as const;
@@ -645,6 +852,11 @@ export default class CanvasPlusPlugin extends Plugin {
       callback: () => diagnoseCanvas(this.app),
     });
     this.addCommand({
+      id: "health-check",
+      name: "（诊断）一键体检：逐项检查各子系统运行状态",
+      callback: () => runHealthCheck(this),
+    });
+    this.addCommand({
       id: "diagnose-deep",
       name: "（诊断）白板增强技术地基深度探测",
       callback: () => deepDiagnose(this.app),
@@ -655,8 +867,10 @@ export default class CanvasPlusPlugin extends Plugin {
       callback: () => diagnoseNodeCreation(this.app),
     });
 
-    // 启动富文本工具条
-    this.register(this.textFormatToolbar.setup(this));
+    // 启动富文本工具条（仅设置开启时已创建）
+    if (this.textFormatToolbar) {
+      this.register(this.textFormatToolbar.setup(this));
+    }
 
     write("=== onload complete ===");
     console.log("[canvas-plus] loaded");
@@ -682,7 +896,19 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallAltDup?.();
     this.uninstallComments?.();
     this.uninstallGuides?.();
+    this.uninstallMindoPatch?.();
+    this.uninstallMindoCards?.();
     this.toolbar?.destroy();
+  }
+
+  /** Mindo 思维导图运行参数（读最新设置） */
+  private mindoOptions(): MindoOptions {
+    return {
+      defaultNodeColor: this.settings.mindoDefaultNodeColor,
+      markNewNodes: this.settings.mindoMarkNewNodes,
+      layoutLevelGapX: this.settings.mindoLayoutLevelGapX,
+      layoutSiblingGapY: this.settings.mindoLayoutSiblingGapY,
+    };
   }
 
   // ============================================================

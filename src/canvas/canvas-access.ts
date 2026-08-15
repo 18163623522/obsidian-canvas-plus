@@ -17,9 +17,15 @@ export function genId(): string {
 
 /** 获取当前激活的 canvas 视图；若没有返回 null */
 export function getActiveCanvasLeaf(app: App): WorkspaceLeaf | null {
+  // 优先当前聚焦的叶子：多画布并排时命令作用于"正在看的"画布，
+  // 而不是 getLeavesOfType 顺序里的最后一个
+  const active = (app.workspace as any).activeLeaf;
+  if (active && (active as any).view?.getViewType?.() === "canvas") {
+    return active as WorkspaceLeaf;
+  }
   const leaves = app.workspace.getLeavesOfType("canvas");
   if (leaves.length === 0) return null;
-  // 简化：返回最后一个 canvas 叶子（Obsidian 内部按聚焦顺序维护）
+  // 回退：最后一个 canvas 叶子（Obsidian 内部按聚焦顺序维护）
   return leaves[leaves.length - 1];
 }
 
@@ -167,6 +173,19 @@ export function targetNodes(canvas: Canvas): CanvasNode[] {
   return sel.length > 0 ? sel : allNodes(canvas);
 }
 
+/**
+ * 仅取当前选中节点，无选中时返回空数组（不回退到全部节点）。
+ * Mindo 等要求明确选中目标的命令用这个——回退到"全部节点的第一个"
+ * 会让命令作用到意料之外的节点上。
+ */
+export function selectedNodes(canvas: Canvas): CanvasNode[] {
+  const sel = canvas.selection;
+  if (!sel) return [];
+  return Array.from(sel.values()).filter(
+    (n) => "nodeData" in n || "getBBox" in n
+  ) as CanvasNode[];
+}
+
 /** 计算 nodes 的包围盒（用于居中/缩放） */
 export function bboxOf(nodes: { x: number; y: number; width: number; height: number }[]) {
   if (nodes.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
@@ -184,11 +203,18 @@ export function bboxOf(nodes: { x: number; y: number; width: number; height: num
 }
 
 /**
- * 可靠创建节点（数据快照模式，参考 Quorafind 插件验证过的写法）
+ * 可靠创建节点
  *
- * 不依赖 createTextNode（签名不稳定）。
- * 直接构造 CanvasNodeData，append 到 getData().nodes，再 setData + requestSave。
- * 这是 Obsidian Canvas 上创建节点的最可靠方式。
+ * 优先用原生单节点 API（createTextNode / createFileNode / createLinkNode /
+ * createGroupNode）：只新增一个节点，不触发全画布 DOM 重建。
+ *
+ * 重要背景：旧实现走 getData→append→setData（数据快照模式），而全量 setData
+ * 会重建所有节点的 DOM，把其他插件写在节点 DOM 上的标记抹掉——例如
+ * Mindo Canvas 的卡片皮肤靠 nodeEl.dataset.mindo 驱动，一次全量 setData
+ * 就会让整张画布的卡片皮肤全部消失。原生 API（Mindo Canvas 自己也在用）
+ * 无此副作用。
+ *
+ * 原生 API 不可用（旧版 Obsidian）时，退回数据快照模式。
  *
  * @returns 新节点的 id
  */
@@ -196,6 +222,38 @@ export function addNodeData(
   canvas: Canvas,
   nodeData: Partial<CanvasNodeData> & { type: string }
 ): string {
+  const c = canvas as any;
+  const pos = { x: nodeData.x ?? 0, y: nodeData.y ?? 0 };
+  const size = {
+    width: nodeData.width ?? (nodeData.type === "file" ? 400 : 300),
+    height: nodeData.height ?? (nodeData.type === "file" ? 300 : 200),
+  };
+  try {
+    let node: any = null;
+    if (nodeData.type === "text" && typeof c.createTextNode === "function") {
+      node = c.createTextNode({ pos, size, text: nodeData.text ?? "", color: nodeData.color });
+    } else if (nodeData.type === "file" && typeof c.createFileNode === "function") {
+      node = c.createFileNode({ pos, size, file: (nodeData as any).file, color: nodeData.color });
+    } else if (nodeData.type === "link" && typeof c.createLinkNode === "function") {
+      node = c.createLinkNode({ pos, size, url: (nodeData as any).url, color: nodeData.color });
+    } else if (nodeData.type === "group" && typeof c.createGroupNode === "function") {
+      node = c.createGroupNode({
+        pos,
+        size,
+        label: (nodeData as any).label,
+        color: nodeData.color,
+        moveNodes: false,
+      });
+    }
+    if (node?.id) {
+      canvas.requestSave();
+      return node.id;
+    }
+  } catch (e) {
+    console.warn("[canvas-plus] 原生节点创建失败，退回数据快照模式", e);
+  }
+
+  // —— 兜底：数据快照模式（会重建全画布 DOM，可能抹掉其他插件的节点 DOM 标记）——
   const id = nodeData.id ?? genId();
   const full: any = {
     // 先放自定义字段

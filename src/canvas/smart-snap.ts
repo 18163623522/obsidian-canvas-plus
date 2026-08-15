@@ -20,6 +20,8 @@ export function setSnapEnabled(enabled: boolean): void {
 
 const SNAP_THRESHOLD = 6; // 像素，画布坐标系下
 const injectedNodes = new WeakSet<HTMLElement>();
+/** nodeEl -> 其 pointerdown 处理器，卸载时移除（否则插件禁用后吸附仍在跑） */
+const injectedHandlers = new Map<HTMLElement, (e: PointerEvent) => void>();
 let guideLayer: SVGElement | null = null;
 
 export function setupSmartSnap(plugin: Plugin): () => void {
@@ -29,21 +31,27 @@ export function setupSmartSnap(plugin: Plugin): () => void {
   return () => {
     clearInterval(timer);
     plugin.app.workspace.offref(layoutRef);
+    for (const [el, fn] of injectedHandlers) {
+      el.removeEventListener("pointerdown", fn, true);
+    }
+    injectedHandlers.clear();
     hideGuides();
   };
 }
 
 function attach(plugin: Plugin) {
-  const leaves = plugin.app.workspace.getLeavesOfType("canvas");
-  if (!leaves.length) return;
-  const canvas = (leaves[0] as any).view?.canvas;
-  if (!canvas?.nodes) return;
+  // 遍历全部画布叶子：多画布并存时每个画布的节点都挂监听
+  for (const leaf of plugin.app.workspace.getLeavesOfType("canvas")) {
+    const canvas = (leaf as any).view?.canvas;
+    if (!canvas?.nodes) continue;
 
-  for (const node of canvas.nodes.values()) {
-    const nodeEl = node?.nodeEl as HTMLElement | undefined;
-    if (!nodeEl || injectedNodes.has(nodeEl)) continue;
-    injectedNodes.add(nodeEl);
-    attachDragHandlers(nodeEl, node, canvas);
+    for (const node of canvas.nodes.values()) {
+      const nodeEl = node?.nodeEl as HTMLElement | undefined;
+      if (!nodeEl || injectedNodes.has(nodeEl)) continue;
+      injectedNodes.add(nodeEl);
+      const handler = attachDragHandlers(nodeEl, node, canvas);
+      injectedHandlers.set(nodeEl, handler);
+    }
   }
 }
 
@@ -63,23 +71,50 @@ function ensureGuideLayer(canvas: any): SVGElement | null {
   return svg;
 }
 
-function attachDragHandlers(nodeEl: HTMLElement, node: any, canvas: any) {
+/** 挂载拖拽监听，返回 pointerdown 处理器（供卸载时移除） */
+function attachDragHandlers(nodeEl: HTMLElement, node: any, canvas: any): (e: PointerEvent) => void {
   let dragging = false;
+  let moved = false;
   let startX = 0, startY = 0;
+  let startNodeX = 0, startNodeY = 0;
+  let lastNodeX = 0, lastNodeY = 0;
+
+  const livePos = () => {
+    const d = node.getData?.() ?? {};
+    return { x: node.x ?? d.x ?? 0, y: node.y ?? d.y ?? 0 };
+  };
 
   const onDown = (e: PointerEvent) => {
     if (!snapEnabled) return; // 开关关闭时不吸附
     if (e.button !== 0) return;
     if ((e.target as HTMLElement).closest(".cm-editor, textarea, input")) return;
     dragging = true;
+    moved = false;
     startX = e.clientX;
     startY = e.clientY;
+    const p = livePos();
+    startNodeX = lastNodeX = p.x;
+    startNodeY = lastNodeY = p.y;
     document.addEventListener("pointermove", onMove, true);
     document.addEventListener("pointerup", onUp, true);
+    // 触摸/笔取消时同样要收尾，否则 document 级监听永不摘除
+    document.addEventListener("pointercancel", onUp, true);
   };
 
   const onMove = (e: PointerEvent) => {
     if (!dragging) return;
+    // 指针在动但节点没动 = 在从连接点拉连线（或无效拖拽）：
+    // 完全不参与，不画辅助线，避免干扰连线交互
+    const p = livePos();
+    const nodeMoved = p.x !== lastNodeX || p.y !== lastNodeY;
+    lastNodeX = p.x;
+    lastNodeY = p.y;
+    if (!nodeMoved && !moved) return;
+    // 移动超过阈值才算拖拽：单击选中、双击进编辑不画辅助线
+    if (!moved) {
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) < 4) return;
+      moved = true;
+    }
     const snap = computeSnap(node, canvas);
     drawGuides(canvas, snap.guides, node);
   };
@@ -88,29 +123,63 @@ function attachDragHandlers(nodeEl: HTMLElement, node: any, canvas: any) {
     dragging = false;
     document.removeEventListener("pointermove", onMove, true);
     document.removeEventListener("pointerup", onUp, true);
+    document.removeEventListener("pointercancel", onUp, true);
     hideGuides();
+    if (!moved) return;
+    // 节点实际没动（如拉出连线后松手）：不吸附、不触发保存
+    const p = livePos();
+    if (p.x === startNodeX && p.y === startNodeY) return;
+    // 松手时若在吸附阈值内，把节点贴齐辅助线（兑现"吸附"）。
+    // 仅单选拖拽时应用，避免多选整组拖动被单节点吸附带偏
+    try {
+      if (canvas.selection?.size === 1) {
+        const snap = computeSnap(node, canvas);
+        if (snap.adjustX !== 0 || snap.adjustY !== 0) {
+          const d = node.getData?.() ?? {};
+          node.setData?.({
+            ...d,
+            x: (node.x ?? d.x ?? 0) + snap.adjustX,
+            y: (node.y ?? d.y ?? 0) + snap.adjustY,
+          });
+        }
+      }
+    } catch {
+      // 吸附失败不影响拖拽本身
+    }
     canvas.requestSave?.();
   };
 
   nodeEl.addEventListener("pointerdown", onDown, true);
+  return onDown;
 }
 
 interface Guide { x1: number; y1: number; x2: number; y2: number; color: string; }
 interface SnapResult { guides: Guide[]; adjustX: number; adjustY: number; }
 
+/** 取节点实时几何信息：拖拽过程中 getData() 是过期快照，优先读 live 字段 */
+function liveBox(n: any): { x: number; y: number; width: number; height: number } {
+  const d = n.getData?.() ?? {};
+  return {
+    x: n.x ?? d.x ?? 0,
+    y: n.y ?? d.y ?? 0,
+    width: n.width ?? d.width ?? 0,
+    height: n.height ?? d.height ?? 0,
+  };
+}
+
 function computeSnap(activeNode: any, canvas: any): SnapResult {
   const guides: Guide[] = [];
   let adjustX = 0, adjustY = 0;
-  const node = activeNode.getData();
+  const node = liveBox(activeNode);
   const ax1 = node.x, ay1 = node.y;
   const ax2 = node.x + node.width, ay2 = node.y + node.height;
   const acx = node.x + node.width / 2, acy = node.y + node.height / 2;
 
   // 候选目标：所有其他节点
-  const candidates: any[] = [];
+  const candidates: Array<ReturnType<typeof liveBox>> = [];
   for (const n of canvas.nodes.values()) {
     if (n.id === activeNode.id) continue;
-    candidates.push(n.getData());
+    candidates.push(liveBox(n));
   }
 
   // 找最近的水平对齐（左/右/中心）
@@ -201,7 +270,7 @@ function drawGuides(canvas: any, guides: Guide[], activeNode?: any) {
 
     // 间距数值标签
     if (activeNode) {
-      const node = activeNode.getData();
+      const node = liveBox(activeNode);
       const isVertical = g.x1 === g.x2; // 垂直线
       // 计算间距：活动节点边到辅助线的距离
       let dist = 0;

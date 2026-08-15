@@ -12,6 +12,8 @@
  */
 import { App, Notice } from "obsidian";
 import type { Canvas, CanvasNode } from "../types/canvas-internal";
+import { genId } from "./canvas-access";
+import { resyncMindoDatasets } from "./mindo";
 
 const COLORS: Record<string, { label: string; bg: string }> = {
   none: { label: "无", bg: "transparent" },
@@ -30,6 +32,16 @@ export class FloatingToolbar {
   private app: App;
   private plugin: any;
   private currentCanvas: any = null;
+  // 跟随机制：记录当前选中的节点/边，定时重算屏幕位置
+  private currentNodes: CanvasNode[] | null = null;
+  private currentEdges: any[] | null = null;
+  private followTimer: number | null = null;
+  /** 工具栏位置模式：top=节点上方（默认）bottom=节点下方 screen-top=屏幕顶部 */
+  positionMode: "top" | "bottom" | "screen-top" = "top";
+  /** 已保存的颜色（调色板），由 main.ts 接到 settings.savedColors */
+  getSavedColors?: () => string[];
+  /** 保存一个颜色到调色板（持久化），由 main.ts 接 saveSettings */
+  saveColor?: (hex: string) => void;
 
   constructor(app: App, plugin?: any) {
     this.app = app;
@@ -57,6 +69,21 @@ export class FloatingToolbar {
     if (nodes.length > 0) {
       this.show(nodes);
     }
+  }
+
+  /**
+   * 光标/选区进入任何 CM 编辑器时隐藏工具条。
+   * 双击节点进入编辑态后 selection-changed 不一定再触发，
+   * 上面的 isEditing 检查没机会执行，靠这个兜底收起，
+   * 避免工具条悬在正在编辑的节点上方与斜杠菜单/格式工具条叠加。
+   */
+  onDocumentSelectionChange(): void {
+    if (!this.el || this.el.style.display === "none") return;
+    const sel = window.getSelection();
+    if (!sel || !sel.anchorNode) return;
+    const anchor = sel.anchorNode;
+    const el = (anchor.nodeType === 3 ? anchor.parentElement : anchor) as HTMLElement | null;
+    if (el?.closest(".cm-editor")) this.hide();
   }
 
   private getSelected(canvas: any): { nodes: CanvasNode[]; edges: any[] } {
@@ -108,6 +135,9 @@ export class FloatingToolbar {
     el.empty();
     el.style.display = "flex";
     el.style.flexDirection = "column";
+    this.currentNodes = nodes;
+    this.currentEdges = null;
+    this.startFollow();
 
     // 辅助：创建一个带标题的分组
     const makeGroup = (title: string): HTMLElement => {
@@ -262,6 +292,122 @@ export class FloatingToolbar {
       };
     }
 
+    // -- Mindo 卡片样式 / 正文对齐 / 色条 / 尺寸 / 连线（合并自 0.8.x 工具条）--
+    const cpRow = makeGroup("Mindo");
+    // 合并块的共享辅助
+    const firstData = (): any => (nodes[0] as any)?.getData?.() ?? {};
+    const applyColor = (hex: string) => {
+      for (const n of nodes) {
+        try {
+          const d = (n as any).getData?.() ?? {};
+          (n as any).setData?.({ ...d, color: hex });
+        } catch (e) { console.error(e); }
+      }
+      this.currentCanvas?.requestSave?.();
+    };
+    // —— Mindo 卡片样式：一键循环 无 → 标题卡 → 无标题卡 ——
+    const curMode = String(firstData().styleAttributes?.mindo ?? "");
+    const styleBtn = el.createEl("button", {
+      cls: "cp-tb-btn cp-tb-stylebtn",
+      attr: { title: "Mindo 卡片样式：点击切换（无 → 标题卡 → 无标题卡）", "aria-label": "Mindo 样式" },
+    });
+    styleBtn.textContent = curMode === "card" ? "🗂" : curMode === "band" ? "▤" : "▦";
+    styleBtn.onclick = async () => {
+      const { toggleMindoStyle } = await import("./mindo");
+      const { refreshMindoCards } = await import("./mindo-card");
+      toggleMindoStyle(this.currentCanvas, nodes.map((n: any) => n.id));
+      // 立即重刷卡片组件 + 工具栏按钮状态；setData 可能异步重建 DOM，
+      // 补两次延时刷新保证新样式及时显示
+      refreshMindoCards(nodes);
+      setTimeout(() => refreshMindoCards(nodes), 150);
+      setTimeout(() => refreshMindoCards(nodes), 400);
+      this.show(nodes);
+    };
+
+    // -- 正文对齐：左对齐 <-> 居中（写原生 textAlign，与原生命令/右键菜单同一状态；
+    //    Obsidian 命令面板搜"对齐"也可绑定快捷键执行本切换）--
+    const curAlign = String(firstData().styleAttributes?.cpAlign === "center"
+      ? "center"
+      : firstData().styleAttributes?.textAlign ?? "left");
+    const alignBtn = el.createEl("button", {
+      cls: "cp-tb-btn cp-tb-alignbtn",
+      attr: { title: "正文对齐：左对齐 / 居中", "aria-label": "正文对齐" },
+    });
+    alignBtn.textContent = curAlign === "center" ? "⇹" : "⇤";
+    alignBtn.onclick = () => {
+      const toCenter = curAlign !== "center";
+      for (const n of nodes) {
+        try {
+          const d = (n as any).getData?.() ?? {};
+          const sa = { ...((d as any).styleAttributes ?? {}) };
+          delete sa.cpAlign; // 统一收敛到原生 textAlign，清掉遗留自定义字段
+          if (toCenter) sa.textAlign = "center";
+          else delete sa.textAlign;
+          (n as any).setData?.({ ...d, styleAttributes: sa });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      this.currentCanvas?.requestSave?.();
+      import("./mindo-card").then(({ refreshMindoCards }) => {
+        refreshMindoCards(nodes);
+        setTimeout(() => refreshMindoCards(nodes), 150);
+      });
+      this.show(nodes);
+    };
+
+    // 色条：色相条拖动（松手时写入，避免拖动中频繁 setData 重建 DOM）
+    const hue = cpRow.createEl("input", {
+      cls: "cp-tb-hue",
+      attr: { type: "range", min: "0", max: "359", step: "1", value: "210", title: "色条：拖动调色相", "aria-label": "色条" },
+    });
+    hue.addEventListener("change", () => {
+      applyColor(hslToHex(parseInt(hue.value, 10), 0.85, 0.55));
+    });
+    // —— 尺寸快捷调整（拖拽手柄不可用时的保底：一键加宽/加高）——
+    const sizeAdj = cpRow.createDiv({ cls: "cp-tb-group" });
+    for (const a of [
+      { t: "↔+", dw: 60, dh: 0, tt: "加宽 60px" },
+      { t: "↔-", dw: -60, dh: 0, tt: "减窄 60px" },
+      { t: "↕+", dw: 0, dh: 40, tt: "加高 40px" },
+      { t: "↕-", dw: 0, dh: -40, tt: "减矮 40px" },
+    ]) {
+      const b = sizeAdj.createEl("button", {
+        cls: "cp-tb-btn",
+        attr: { title: a.tt, "aria-label": a.tt },
+      });
+      b.textContent = a.t;
+      b.onclick = () => {
+        for (const n of nodes) {
+          try {
+            const d = (n as any).getData?.() ?? {};
+            const w = Math.max(80, (d.width ?? (n as any).width ?? 200) + a.dw);
+            const h = Math.max(40, (d.height ?? (n as any).height ?? 100) + a.dh);
+            (n as any).setData?.({ ...d, width: w, height: h });
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        this.currentCanvas?.requestSave?.();
+      };
+    }
+
+    el.createDiv({ cls: "cp-tb-divider" });
+
+    // —— 连线模式（不依赖悬停圆点，远程/触屏等丢 hover 的环境也能连线）——
+    // 点它后进入连线模式，再点目标节点即建箭头连线，Esc 取消
+    const linkBtn = el.createEl("button", {
+      cls: "cp-tb-btn",
+      attr: { title: "连线：点后选来源，再点目标节点", "aria-label": "连线" },
+    });
+    linkBtn.textContent = "🔗";
+    linkBtn.onclick = () => {
+      if (nodes.length === 0) return;
+      this.enterLinkMode(nodes[0]);
+    };
+
+    el.createDiv({ cls: "cp-tb-divider" });
+
     // -- 样式 --
     const styleRow = makeGroup("样式");
     btn(styleRow, "T̄", "切换纯文字/卡片", async () => {
@@ -368,6 +514,9 @@ export class FloatingToolbar {
     const el = this.ensureEl();
     el.empty();
     el.style.display = "flex";
+    this.currentEdges = edges;
+    this.currentNodes = null;
+    this.startFollow();
 
     // —— 线型 ——
     const styleGroup = el.createDiv({ cls: "cp-tb-group" });
@@ -428,11 +577,17 @@ export class FloatingToolbar {
       btn.onclick = () => {
         for (const e of edges) {
           try {
-            (e as any).setColor?.(key);
+            // CanvasEdge 没有 setColor 方法，走 setData 改颜色
+            const d = (e as any).getData?.() ?? {};
+            const ed: any = { ...d };
+            if (key) ed.color = key;
+            else delete ed.color;
+            (e as any).setData?.(ed);
           } catch (err) {
             console.error(err);
           }
         }
+        this.currentCanvas?.requestSave?.();
         this.hide();
       };
     }
@@ -460,6 +615,53 @@ export class FloatingToolbar {
     this.positionEdge(edges);
   }
 
+  /**
+   * 跟随循环：工具条可见期间定时按选中节点的当前屏幕位置重算坐标。
+   * 不跟随的话，平移/缩放/拖动节点后工具条会滞留原地，
+   * 恰好盖住节点的连接点，导致"从节点边缘拉不出连线"。
+   */
+  private startFollow(): void {
+    if (this.followTimer !== null) return;
+    this.followTimer = window.setInterval(() => this.followTick(), 80);
+  }
+
+  private stopFollow(): void {
+    if (this.followTimer !== null) {
+      clearInterval(this.followTimer);
+      this.followTimer = null;
+    }
+  }
+
+  private followTick(): void {
+    if (!this.el || this.el.style.display === "none") {
+      this.stopFollow();
+      return;
+    }
+    if (this.currentNodes && this.currentNodes.length > 0) {
+      // 节点被删除/重建（nodeEl 脱离文档）则收起
+      const alive = this.currentNodes.some(
+        (n) => (n as any).nodeEl && document.contains((n as any).nodeEl)
+      );
+      if (!alive) {
+        this.hide();
+        return;
+      }
+      this.position(this.currentNodes);
+      return;
+    }
+    if (this.currentEdges && this.currentEdges.length > 0) {
+      const alive = this.currentEdges.some((e) => {
+        const p = e.path ?? e.line;
+        return p && document.contains(p);
+      });
+      if (!alive) {
+        this.hide();
+        return;
+      }
+      this.positionEdge(this.currentEdges);
+    }
+  }
+
   /** 定位到边的屏幕中点上方 */
   private positionEdge(edges: any[]): void {
     if (!this.el) return;
@@ -480,18 +682,24 @@ export class FloatingToolbar {
       this.hide();
       return;
     }
+    const cx = (minX + maxX) / 2;
     const tbRect = this.el.getBoundingClientRect();
-    // 放连线右侧
-    const left = maxX + 8;
-    const finalLeft = left + tbRect.width < window.innerWidth - 8 ? left : minX - tbRect.width - 8;
-    this.el.style.flexDirection = "column";
-    this.el.style.left = `${Math.max(8, finalLeft)}px`;
-    this.el.style.top = `${Math.max(8, Math.min(minY, window.innerHeight - tbRect.height - 8))}px`;
+    this.el.style.left = `${Math.max(8, cx - tbRect.width / 2)}px`;
+    // 与边保持 16px 间距，避让连线交互区
+    this.el.style.top = `${Math.max(8, minY - tbRect.height - 16)}px`;
   }
 
-  /** 定位到选中节点集合的包围盒上方居中 */
+  /** 定位到选中节点集合；按 positionMode 决定上方/下方/屏幕顶部 */
   private position(nodes: CanvasNode[]): void {
     if (!this.el) return;
+    // 屏幕顶部固定：横条贴顶居中，完全不挡画布
+    if (this.positionMode === "screen-top") {
+      const tbRect = this.el.getBoundingClientRect();
+      this.el.style.left = `${Math.max(8, (window.innerWidth - tbRect.width) / 2)}px`;
+      this.el.style.top = "8px";
+      return;
+    }
+    // 合并所有选中节点的屏幕矩形
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of nodes) {
       const nodeEl = (n as any).nodeEl as HTMLElement | undefined;
@@ -507,21 +715,87 @@ export class FloatingToolbar {
       return;
     }
     const tbRect = this.el.getBoundingClientRect();
-    // 放节点右侧，竖向排列
-    const left = maxX + 8;
-    const top = minY;
-    // 右侧空间不够时放左侧
-    const finalLeft = left + tbRect.width < window.innerWidth - 8 ? left : minX - tbRect.width - 8;
-    this.el.style.flexDirection = "column";
-    this.el.style.left = `${Math.max(8, finalLeft)}px`;
-    this.el.style.top = `${Math.max(8, Math.min(top, window.innerHeight - tbRect.height - 8))}px`;
+    const width = maxX - minX;
+    const left = minX + width / 2 - tbRect.width / 2;
+    // 与节点保持 16px 间距：节点四边中点的连接点（拉出连线的小圆点）
+    // 贴边缘内侧放置，16px 间距保证工具条不盖住它们
+    let top: number;
+    if (this.positionMode === "bottom") {
+      top = maxY + 16;
+      if (top + tbRect.height > window.innerHeight - 8) top = minY - tbRect.height - 16;
+    } else {
+      top = minY - tbRect.height - 16;
+      if (top < 8) top = Math.min(maxY + 16, window.innerHeight - tbRect.height - 8);
+    }
+    this.el.style.left = `${Math.max(8, Math.min(left, window.innerWidth - tbRect.width - 8))}px`;
+    this.el.style.top = `${Math.max(8, top)}px`;
+  }
+
+  /**
+   * 连线模式：不依赖悬停圆点。点工具栏 🔗 后进入，
+   * 再点任意目标节点即建立 来源→目标 箭头连线，Esc 取消。
+   * 解决远程桌面/触屏等 hover 事件丢失导致原生圆点不出现的问题。
+   */
+  private linkCleanup?: () => void;
+
+  private enterLinkMode(source: CanvasNode): void {
+    this.exitLinkMode();
+    this.hide();
+    new Notice("连线模式：点击目标节点（Esc 取消）", 3000);
+
+    const onClick = (e: MouseEvent) => {
+      const target = (e.target as HTMLElement).closest(".canvas-node") as HTMLElement | null;
+      if (!target) return;
+      const canvas = this.currentCanvas as any;
+      if (!canvas?.nodes) return;
+      let hit: CanvasNode | null = null;
+      for (const n of canvas.nodes.values()) {
+        if ((n as any).nodeEl === target) { hit = n; break; }
+      }
+      if (!hit || hit === source) return;
+      e.stopPropagation();
+      this.createEdge(canvas, (source as any).id, (hit as any).id);
+      this.exitLinkMode();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") this.exitLinkMode();
+    };
+    document.addEventListener("click", onClick, true);
+    document.addEventListener("keydown", onKey, true);
+    this.linkCleanup = () => {
+      document.removeEventListener("click", onClick, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }
+
+  private exitLinkMode(): void {
+    this.linkCleanup?.();
+    this.linkCleanup = undefined;
+  }
+
+  private createEdge(canvas: any, fromId: string, toId: string): void {
+    try {
+      const data = canvas.getData();
+      const id = genId();
+      data.edges = [...(data.edges || []), { id, fromNode: fromId, toNode: toId, toEnd: "arrow" } as any];
+      canvas.setData(data);
+      canvas.requestSave();
+      resyncMindoDatasets(canvas);
+      new Notice("已连线", 2000);
+    } catch (e) {
+      console.error("[canvas-plus] createEdge failed", e);
+    }
   }
 
   hide(): void {
     if (this.el) this.el.style.display = "none";
+    this.currentNodes = null;
+    this.currentEdges = null;
+    this.stopFollow();
   }
 
   destroy(): void {
+    this.stopFollow();
     this.el?.remove();
     this.el = null;
   }
@@ -536,7 +810,9 @@ export class FloatingToolbar {
   // ============================================================
   private moveNode(node: CanvasNode, x: number, y: number): void {
     try {
-      (node as any).setData?.({ x: Math.round(x), y: Math.round(y) } as any);
+      // 全量展开再覆盖坐标：防止 setData 以替换语义实现时把节点其他数据清掉
+      const d = (node as any).getData?.() ?? {};
+      (node as any).setData?.({ ...d, x: Math.round(x), y: Math.round(y) } as any);
     } catch (e) {
       console.error(e);
     }
@@ -588,4 +864,15 @@ export class FloatingToolbar {
     sorted.forEach((n, i) => this.moveNode(n, n.x, first.y + step * i));
     this.currentCanvas?.requestSave?.();
   }
+}
+
+/** HSL 转 HEX（色条输出需要，JSON Canvas 的 color 字段只认 hex/预设值） */
+function hslToHex(h: number, s: number, l: number): string {
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const c = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+    return Math.round(255 * c).toString(16).padStart(2, "0");
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
 }

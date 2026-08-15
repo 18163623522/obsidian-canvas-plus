@@ -1,20 +1,34 @@
 /**
  * 节点富文本工具条（选中文本片段时弹出）
  *
- * 在编辑器（笔记 MarkdownView 或 Canvas 文本节点 CM6）内选中文字时，
- * 在选区上方弹出浮动工具条：加粗 / 斜体 / 高亮 / 行内代码 / 字号。
+ * 在编辑器（笔记 MarkdownView 或 Canvas 文本节点 CM6）内选中文字时弹出：
+ *  - 基础格式：加粗 / 斜体 / 高亮 / 行内代码 / 下划线
+ *  - 文字颜色：色轮（系统取色器）+ 色条（色相条拖动）
+ *  - 文字字号：0.6×–2.4× 无级滑杆
+ *  - 清除选中文字上的行内样式
  *
- * 实现：document 级 selectionchange 监听，判断有非空选区且在编辑器内时显示。
+ * 出现形式：选区【下方】。Obsidian 原生格式工具条出现在选区上方，
+ * 本工具条放下方，避免遮挡原生工具条；屏幕放不下时收缩进视口。
  */
 import type { Plugin } from "obsidian";
 import { MarkdownView } from "obsidian";
 import { setBlockFontSize } from "../editor/block-fontsize";
+import { findEditorViewFromSelection } from "../editor/cm-access";
 
 export class TextFormatToolbar {
   private el: HTMLElement | null = null;
   private fontPanel: HTMLElement | null = null;
+  private app: any = null;
+  /**
+   * 工具条弹出时缓存的 CM6 EditorView。
+   * 滑杆/取色器需要默认 mousedown 行为（会把 DOM 选区折叠到工具条内），
+   * 之后无法再从 window.getSelection() 反查编辑器——一律用此缓存。
+   * CM 的 state.selection 不受 DOM 选区折叠影响。
+   */
+  private currentCm: any = null;
 
   setup(plugin: Plugin): () => void {
+    this.app = plugin.app;
     const onSelChange = () => this.onSelectionChange(plugin);
     document.addEventListener("selectionchange", onSelChange);
     return () => {
@@ -24,6 +38,9 @@ export class TextFormatToolbar {
   }
 
   private onSelectionChange(plugin: Plugin) {
+    // 焦点在工具条自身控件上（拖色条/字号滑杆、系统取色器）时不响应——
+    // 否则重建 DOM 会打断正在进行的拖动
+    if (this.el && document.activeElement && this.el.contains(document.activeElement)) return;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || sel.rangeCount === 0 || sel.toString().trim() === "") {
       this.hide();
@@ -53,7 +70,10 @@ export class TextFormatToolbar {
     const el = this.ensureEl();
     el.empty();
     el.style.display = "flex";
+    // 缓存当前选区所在的编辑器：input 类控件交互过程中 DOM 选区会丢
+    this.currentCm = this.getEditorView();
 
+    // —— 基础格式按钮 ——
     const buttons: Array<{ label: string; title: string; action: string }> = [
       { label: "B", title: "加粗", action: "bold" },
       { label: "I", title: "斜体", action: "italic" },
@@ -86,10 +106,92 @@ export class TextFormatToolbar {
       this.toggleFontPanel(plugin, fontBtn);
     };
 
-    // 定位
+    el.createDiv({ cls: "cp-tb-divider" });
+
+    // —— 色轮（系统取色器）——
+    const colorInput = el.createEl("input", {
+      cls: "cp-tf-color",
+      attr: { type: "color", title: "色轮：任意颜色", "aria-label": "色轮：任意颜色" },
+    });
+    colorInput.addEventListener("input", () => {
+      if (colorInput.value) this.applySpanStyle(`color:${colorInput.value}`);
+    });
+
+    // —— 色条（色相条，拖动连续取色）——
+    const hue = el.createEl("input", {
+      cls: "cp-tf-hue",
+      attr: { type: "range", min: "0", max: "359", step: "1", value: "210", title: "色条：拖动调色相", "aria-label": "色条：拖动调色相" },
+    });
+    hue.addEventListener("input", () => {
+      this.applySpanStyle(`color:hsl(${hue.value}, 85%, 55%)`);
+    });
+
+    el.createDiv({ cls: "cp-tb-divider" });
+
+    // —— 字号无级调节 ——
+    const sizeLabel = el.createSpan({ cls: "cp-tf-size-label", text: "1.00×" });
+    const size = el.createEl("input", {
+      cls: "cp-tf-size",
+      attr: { type: "range", min: "0.6", max: "2.4", step: "0.05", value: "1", title: "字号：无级调节", "aria-label": "字号：无级调节" },
+    });
+    size.addEventListener("input", () => {
+      const v = parseFloat(size.value);
+      sizeLabel.setText(`${v.toFixed(2)}×`);
+      this.applySpanStyle(v === 1 ? "font-size:" : `font-size:${v}em`);
+    });
+
+    el.createDiv({ cls: "cp-tb-divider" });
+
+    // —— 清除行内样式 ——
+    const clearBtn = el.createEl("button", {
+      cls: "cp-tf-btn",
+      attr: { title: "清除选中文字的颜色/字号样式", "aria-label": "清除行内样式" },
+    });
+    clearBtn.textContent = "⌫";
+    clearBtn.onclick = () => {
+      const cm = this.currentCm ?? this.getEditorView();
+      if (cm) this.applyInline(cm, stripInlineSpans);
+    };
+
+    // —— 定位 ——
+    el.style.display = "flex"; // 先显示才能量尺寸
     const tbRect = el.getBoundingClientRect();
-    el.style.left = `${Math.max(8, rect.left + rect.width / 2 - tbRect.width / 2)}px`;
-    el.style.top = `${Math.max(8, rect.top - tbRect.height - 8)}px`;
+    const centerX = rect.left + rect.width / 2;
+    const left = Math.max(8, Math.min(centerX - tbRect.width / 2, window.innerWidth - tbRect.width - 8));
+
+    // 选区在画布文本节点内时：工具条钳制在节点矩形内部——
+    // 节点边缘一圈是原生连接点（拉出箭头的小圆点）的交互区，
+    // 工具条绝不能越过去挡住它们
+    const nodeEl = (sel.anchorNode?.nodeType === 3 ? (sel.anchorNode as any).parentElement : sel.anchorNode) as HTMLElement | null;
+    const canvasNode = nodeEl?.closest(".canvas-node") as HTMLElement | null;
+    let top: number;
+    if (canvasNode) {
+      const nr = canvasNode.getBoundingClientRect();
+      // 连接点（拉箭头的小圆点）贴着节点边缘【内侧】放置，约占 16px——
+      // 工具条钳制在节点内部时四边都要让出这一圈
+      const inset = 16;
+      const above = rect.top - tbRect.height - 8; // 优先选区上方（节点内）
+      const below = rect.bottom + 8;
+      top = above >= nr.top + inset ? above : below;
+      // 钳制到节点内部且避开连接点圈（节点太矮放不下时贴着安全区顶部）
+      const maxTop = Math.max(nr.top + inset, nr.bottom - tbRect.height - inset);
+      top = Math.min(Math.max(top, nr.top + inset), maxTop);
+      // 水平也钳制在节点内（同样避开连接点圈）
+      const clampedLeft = Math.min(
+        Math.max(left, nr.left + inset),
+        Math.max(nr.left + inset, nr.right - tbRect.width - inset)
+      );
+      el.style.left = `${clampedLeft}px`;
+      el.style.top = `${top}px`;
+      return;
+    }
+
+    // 笔记内：选区下方并让出一条"原生车道"（约一个工具条高度）。
+    // Obsidian 原生/编辑工具条类插件贴着选区出现（在上/下方），
+    // 我们下移 40px 保证互不遮挡；贴到视口底也不回到紧贴选区的位置。
+    top = Math.min(rect.bottom + 40, window.innerHeight - tbRect.height - 8);
+    el.style.left = `${Math.max(8, left)}px`;
+    el.style.top = `${Math.max(8, top)}px`;
   }
 
   /** 切换字号滑块面板的显示 */
@@ -177,13 +279,82 @@ export class TextFormatToolbar {
     if (this.el && document.body.contains(this.el)) return this.el;
     const el = document.body.createDiv({ cls: "cp-text-format-toolbar" });
     this.el = el;
-    // 点外面关闭
-    el.addEventListener("mousedown", (e) => e.stopPropagation());
+    // 按钮类控件阻止焦点转移（保住编辑器选区）；滑杆/取色器需要默认行为
+    el.addEventListener("mousedown", (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest("button")) e.preventDefault();
+      e.stopPropagation();
+    });
     return el;
   }
 
+  /**
+   * 定位选区所在的 CM6 EditorView。
+   * 经运行时验证：.cm-editor/.cm-content 上没有 cmView 属性（社区反查法
+   * 无效），必须走 Obsidian 官方对象（markdown leaf 的 editor.cm /
+   * 画布节点的 child.editMode.cm / activeEditor 兜底）。
+   */
+  private getEditorView(): any | null {
+    if (!this.app) return null;
+    return findEditorViewFromSelection(this.app);
+  }
+
+  /**
+   * 对选中文字应用一个文本变换（build 返回新文本），变换后保持文字处于选中状态，
+   * 便于连续调整（如拖动色条/字号滑杆）反复作用在同一段文字上。
+   */
+  private applyInline(cm: any, build: (text: string) => string): void {
+    const sel = cm.state.selection.main;
+    const text = cm.state.sliceDoc(sel.from, sel.to);
+    const insert = build(text);
+    if (insert === text) return;
+    cm.dispatch({
+      changes: { from: sel.from, to: sel.to, insert },
+      selection: { anchor: sel.from, head: sel.from + insert.length },
+    });
+  }
+
+  /** 用 <span style="..."> 包裹选中文字（同类型包裹会被替换而非嵌套）；传空 value 表示剥除该样式 */
+  private applySpanStyle(styleDecl: string): void {
+    const cm = this.currentCm ?? this.getEditorView();
+    if (!cm) return;
+    const m = styleDecl.match(/^([a-z-]+):(.*)$/);
+    if (!m) return;
+    const prop = m[1];
+    const value = m[2];
+    const re = new RegExp(`^<span style="${prop}:[^"]*">([\\s\\S]*)</span>$`);
+    this.applyInline(cm, (text) => {
+      const inner = text.replace(re, "$1"); // 剥掉旧的同类包裹
+      if (!value) return inner; // 空 value = 清除该样式
+      return `<span style="${prop}:${value}">${inner}</span>`;
+    });
+  }
+
   private applyFormat(plugin: Plugin, action: string) {
-    // 优先用 Obsidian 内置格式化命令（最可靠，处理选区包裹）
+    // 标记对（行内代码用反引号，下划线用 HTML 标签）
+    const markers: Record<string, [string, string]> = {
+      bold: ["**", "**"],
+      italic: ["*", "*"],
+      highlight: ["==", "=="],
+      code: ["`", "`"],
+      underline: ["<u>", "</u>"],
+    };
+
+    // 优先直接对 CM6 派发：笔记编辑器和 Canvas 文本节点都走这里，
+    // 精确作用于选区所在的编辑器（executeCommandById 只作用于激活的
+    // MarkdownView，在 Canvas 节点内会失效或打到别的编辑器）
+    const cm = this.currentCm ?? this.getEditorView();
+    const m = markers[action];
+    if (cm && m) {
+      this.applyInline(cm, (text) => {
+        const wrapped =
+          text.startsWith(m[0]) && text.endsWith(m[1]) && text.length >= m[0].length + m[1].length;
+        return wrapped ? text.slice(m[0].length, text.length - m[1].length) : m[0] + text + m[1];
+      });
+      return;
+    }
+
+    // 兜底：非 CM 上下文（如阅读视图）走 Obsidian 内置命令
     const commandMap: Record<string, string> = {
       bold: "editor:toggle-bold",
       italic: "editor:toggle-italics",
@@ -196,7 +367,6 @@ export class TextFormatToolbar {
       // @ts-ignore executeCommandById 在运行时存在
       plugin.app.commands?.executeCommandById?.(cmdId);
     }
-    this.hide();
   }
 
   hide() {
@@ -207,4 +377,15 @@ export class TextFormatToolbar {
     this.el?.remove();
     this.el = null;
   }
+}
+
+/** 剥除选中文字里所有行内 span 样式包裹（颜色/字号等，支持嵌套） */
+function stripInlineSpans(text: string): string {
+  let out = text;
+  let prev = "";
+  while (prev !== out) {
+    prev = out;
+    out = out.replace(/<span style="[^"]*">([\s\S]*?)<\/span>/g, "$1");
+  }
+  return out;
 }

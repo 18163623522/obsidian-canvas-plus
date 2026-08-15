@@ -260,7 +260,7 @@ export async function generateCanvasFromNote(
       new Notice("已创建画布文件，但布局失败：请打开后手动运行布局命令");
       return newFile;
     }
-    return newFile;
+    // 不提前 return：落到下方统一自动布局（否则新节点全部堆在 (0,0)）
   }
 
   // —— 自动布局 ——
@@ -270,7 +270,8 @@ export async function generateCanvasFromNote(
   );
   applyLayout(canvas, canvasNodes, newEdges, { type: layoutType });
   new Notice(`已生成 ${newNodes.length} 个节点 / ${newEdges.length} 条边`);
-  return opts.mode === "append" ? canvas.view.file : null;
+  // append 返回现有画布文件；new 模式此时激活的就是新建画布，view.file 即新文件
+  return canvas.view.file;
 }
 
 /** 等到 canvas 视图真正可读 */

@@ -12,6 +12,9 @@ import type { CanvasNode } from "../types/canvas-internal";
 
 const FLAG_LOCKED = "cpLocked";
 const FLAG_HIDDEN = "cpHidden";
+// 分组折叠标记由 group-collapse.ts 写入（子节点 + group 自身），
+// 统一在此定义避免两处各自维护导致标记不一致
+export const FLAG_COLLAPSED = "cpCollapsed";
 
 /** 切换锁定 */
 export function toggleLock(node: CanvasNode): boolean {
@@ -69,7 +72,9 @@ export function applyLayerStyle(node: CanvasNode): void {
   // 锁定
   const isLocked = !!data[FLAG_LOCKED];
   nodeEl.classList.toggle("cp-locked", isLocked);
-  // 隐藏
-  const isHidden = !!data[FLAG_HIDDEN];
+  // 隐藏：图层隐藏（cpHidden）或被分组折叠（cpCollapsed）。
+  // group 节点自身带 cpCollapsed 表示"该分组处于折叠态"，但分组框本身必须保持可见
+  const isCollapsed = data.type !== "group" && !!data[FLAG_COLLAPSED];
+  const isHidden = !!data[FLAG_HIDDEN] || isCollapsed;
   nodeEl.classList.toggle("cp-hidden", isHidden);
 }

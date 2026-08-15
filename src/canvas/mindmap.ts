@@ -12,6 +12,7 @@ import { App, Notice, TFile } from "obsidian";
 import type { Canvas, CanvasNode, CanvasEdgeData } from "../types/canvas-internal";
 import { genId } from "./canvas-access";
 import { applyLayout } from "./layout";
+import { resyncMindoDatasets } from "./mindo";
 
 /** 把一段文本拆成"子项"（每行/每个列表项一个） */
 function splitTextToItems(text: string): string[] {
@@ -129,6 +130,13 @@ export function expandMindmap(app: App, canvas: Canvas, opts: MindmapOptions = {
     } as CanvasEdgeData);
   });
 
+  // 把边写入画布（此前只收集未写入，展开出来的节点全是没连线的孤节点）
+  if (newEdges.length > 0) {
+    const data = canvas.getData();
+    canvas.setData({ ...data, edges: [...data.edges, ...newEdges] });
+    // 全量 setData 重建节点 DOM，立即回填 Mindo 卡片标记
+    resyncMindoDatasets(canvas);
+  }
   canvas.requestSave();
 
   // 对父节点 + 新子节点套用树形布局

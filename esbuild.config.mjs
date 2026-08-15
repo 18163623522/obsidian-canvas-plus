@@ -12,7 +12,7 @@ const builtins = [
   "tty", "url", "util", "v8", "vm", "wasi", "worker_threads", "zlib",
 ];
 
-const pluginDir = "D:/001_Archive/文档/Note/Note/.obsidian/plugins/canvas-plus";
+const pluginDir = "D:/Note/Obsidian/.obsidian/plugins/canvas-plus";
 
 const context = {
   entryPoints: ["src/main.ts"],

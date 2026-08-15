@@ -12,6 +12,7 @@
  *  - 白板（Canvas 文本节点）：轮询 node.child.editMode.cm，给其 dom 挂 paste 监听
  */
 import type { Plugin } from "obsidian";
+import { findEditorViewFromElement } from "../editor/cm-access";
 
 const injected = new WeakSet<HTMLElement>();
 
@@ -61,12 +62,18 @@ export function htmlTableToMarkdown(html: string): string | null {
 export function tsvToMarkdown(text: string): string | null {
   const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length < 2) return null; // 至少 2 行才像表格
-  // 必须含 Tab，且大部分行有 Tab
-  const tabLines = lines.filter((l) => l.includes("\t"));
-  if (tabLines.length < lines.length * 0.5) return null;
+  // Tab 必须是"分隔符"而非"缩进"：至少 80% 的行里 Tab 出现在内容之后
+  // （\S\t = 非空白字符后跟 Tab）。Tab 缩进的代码/日志因此被排除。
+  const sepLines = lines.filter((l) => /\S\t/.test(l));
+  if (sepLines.length < lines.length * 0.8) return null;
 
   const matrix = lines.map((l) => l.split("\t"));
-  const colCount = Math.max(...matrix.map((r) => r.length));
+  // 列数应基本一致（±1）：Excel/Sheets 的行内空尾单元格可能差 1，
+  // 而乱缩进代码的"列数"通常杂乱
+  const counts = matrix.map((r) => r.length);
+  if (Math.max(...counts) - Math.min(...counts) > 1) return null;
+
+  const colCount = Math.max(...counts);
   const normalized = matrix.map((r) => {
     while (r.length < colCount) r.push("");
     return r.map((c) => c.replace(/\|/g, "\\|").trim());
@@ -144,9 +151,8 @@ export function setupTablePaste(plugin: Plugin): () => void {
     e.preventDefault();
     e.stopPropagation();
 
-    // 找到 CM6 EditorView 实例
-    const cmDom = cmEditor as HTMLElement;
-    const cm = (cmDom as any).cmView?.view ?? (cmDom as any).view;
+    // 经运行时验证：.cm-editor 上没有 cmView 属性，必须走官方对象定位
+    const cm = findEditorViewFromElement(plugin.app, target);
     if (cm && cm.state && cm.dispatch) {
       const sel = cm.state.selection.main;
       cm.dispatch({

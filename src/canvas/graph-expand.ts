@@ -11,6 +11,7 @@ import { App, Notice, TFile } from "obsidian";
 import type { Canvas, CanvasNode, CanvasEdgeData } from "../types/canvas-internal";
 import { addNodeData } from "./canvas-access";
 import { applyLayout } from "./layout";
+import { resyncMindoDatasets } from "./mindo";
 
 interface ExpandOptions {
   /** 展开深度（1=直接链接，2=链接的链接...） */
@@ -164,16 +165,16 @@ export function expandGraph(app: App, canvas: Canvas, opts: ExpandOptions = { de
     const data = canvas.getData();
     canvas.setData({ ...data, edges: [...data.edges, ...newEdges] });
     canvas.requestSave();
+    // 全量 setData 会重建节点 DOM，立即回填 Mindo 卡片标记（不等轮询）
+    resyncMindoDatasets(canvas);
   }
 
-  // 对所有节点用力导向布局
-  const allNodes = Array.from(canvas.nodes.values()).map((n: any) => ({
-    id: n.id,
-    width: n.width,
-    height: n.height,
-  }));
-  const allEdges = canvas.getData().edges.map((e) => ({ from: e.fromNode, to: e.toNode }));
-  applyLayout(canvas, allNodes as any, allEdges as any, { type: "force" });
+  // 对所有节点用力导向布局（必须传真实 CanvasNode：applyLayout 会调用
+  // node.setData 写坐标，纯 {id,width,height} 字面量会抛 TypeError；
+  // 边也必须传原始 CanvasEdgeData——applyLayout 按 fromNode/toNode 过滤，
+  // 映射成 {from,to} 会让布局完全无视连线）
+  const allNodes = Array.from(canvas.nodes.values());
+  applyLayout(canvas, allNodes, canvas.getData().edges, { type: "force" });
 
   new Notice(`知识图谱：展开 ${files.length} 个节点 / ${newEdges.length} 条边`);
 }

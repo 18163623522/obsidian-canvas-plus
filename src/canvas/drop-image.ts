@@ -15,57 +15,63 @@ import { createFileViaData } from "./canvas-access";
 const IMAGE_RE = /\.(png|jpe?g|gif|svg|webp|bmp)$/i;
 
 export function setupDropHandler(plugin: Plugin): () => void {
-  const handlers = new Map<HTMLElement, (e: DragEvent) => void>();
+  // wrapper -> 卸载函数（同时移除 drop 和 dragover 两个监听）
+  const handlers = new Map<HTMLElement, () => void>();
 
   const attach = () => {
-    const leaves = plugin.app.workspace.getLeavesOfType("canvas");
-    if (!leaves.length) return;
-    const canvas = (leaves[0] as any).view?.canvas;
-    const wrapper = canvas?.wrapperEl as HTMLElement | undefined;
-    if (!wrapper || handlers.has(wrapper)) return;
+    // 遍历全部画布叶子：多画布并存时每个画布都支持拖入图片
+    for (const leaf of plugin.app.workspace.getLeavesOfType("canvas")) {
+      const canvas = (leaf as any).view?.canvas;
+      const wrapper = canvas?.wrapperEl as HTMLElement | undefined;
+      if (!wrapper || handlers.has(wrapper)) continue;
 
-    const onDrop = async (e: DragEvent) => {
-      const dt = e.dataTransfer;
-      if (!dt) return;
-      // 只处理含文件的拖拽
-      const hasFiles = dt.files && dt.files.length > 0;
-      const hasHtmlImg = Array.from(dt.items || []).some(
-        (i) => i.kind === "file" && i.type.startsWith("image/")
-      );
-      if (!hasFiles && !hasHtmlImg) return;
+      const onDrop = async (e: DragEvent) => {
+        const dt = e.dataTransfer;
+        if (!dt) return;
+        // 只处理含文件的拖拽
+        const hasFiles = dt.files && dt.files.length > 0;
+        const hasHtmlImg = Array.from(dt.items || []).some(
+          (i) => i.kind === "file" && i.type.startsWith("image/")
+        );
+        if (!hasFiles && !hasHtmlImg) return;
 
-      e.preventDefault();
-      e.stopPropagation();
+        e.preventDefault();
+        e.stopPropagation();
 
-      const canvas2 = (leaves[0] as any).view?.canvas;
-      if (!canvas2) return;
+        const canvas2 = (leaf as any).view?.canvas;
+        if (!canvas2) return;
 
-      // 释放点 → 画布坐标
-      const dropPos = canvas2.posFromEvt?.(e) ?? canvas2.posFromClient?.({
-        x: e.clientX,
-        y: e.clientY,
-      }) ?? { x: 0, y: 0 };
+        // 释放点 → 画布坐标
+        const dropPos = canvas2.posFromEvt?.(e) ?? canvas2.posFromClient?.({
+          x: e.clientX,
+          y: e.clientY,
+        }) ?? { x: 0, y: 0 };
 
-      // 1. 真实文件（从文件管理器拖入）
-      if (dt.files && dt.files.length > 0) {
-        for (const file of Array.from(dt.files)) {
-          await importAndCreate(plugin.app, canvas2, file, dropPos);
+        // 1. 真实文件（从文件管理器拖入）
+        if (dt.files && dt.files.length > 0) {
+          for (const file of Array.from(dt.files)) {
+            await importAndCreate(plugin.app, canvas2, file, dropPos);
+          }
+          return;
         }
-        return;
-      }
 
-      // 2. 网页图片（拖入的是 img 元素，需从 items 取）
-      for (const item of Array.from(dt.items || [])) {
-        if (item.kind === "file" && item.type.startsWith("image/")) {
-          const f = item.getAsFile();
-          if (f) await importAndCreate(plugin.app, canvas2, f as File, dropPos);
+        // 2. 网页图片（拖入的是 img 元素，需从 items 取）
+        for (const item of Array.from(dt.items || [])) {
+          if (item.kind === "file" && item.type.startsWith("image/")) {
+            const f = item.getAsFile();
+            if (f) await importAndCreate(plugin.app, canvas2, f as File, dropPos);
+          }
         }
-      }
-    };
-    wrapper.addEventListener("drop", onDrop, true);
-    // 阻止 Obsidian 默认处理（避免它当成文本插入）
-    wrapper.addEventListener("dragover", (e) => e.preventDefault(), true);
-    handlers.set(wrapper, onDrop);
+      };
+      // 阻止 Obsidian 默认处理（避免它当成文本插入）
+      const onDragOver = (e: DragEvent) => e.preventDefault();
+      wrapper.addEventListener("drop", onDrop, true);
+      wrapper.addEventListener("dragover", onDragOver, true);
+      handlers.set(wrapper, () => {
+        wrapper.removeEventListener("drop", onDrop, true);
+        wrapper.removeEventListener("dragover", onDragOver, true);
+      });
+    }
   };
 
   const timer = setInterval(attach, 800);
@@ -75,9 +81,7 @@ export function setupDropHandler(plugin: Plugin): () => void {
   return () => {
     clearInterval(timer);
     plugin.app.workspace.offref(layoutRef);
-    for (const [el, fn] of handlers) {
-      el.removeEventListener("drop", fn, true);
-    }
+    for (const dispose of handlers.values()) dispose();
     handlers.clear();
   };
 }
