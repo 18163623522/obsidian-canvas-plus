@@ -5,9 +5,9 @@
  * 等原生菜单出现后，往它的 DOM 里追加我们的菜单项。
  * 子菜单用延时关闭，hover 顺畅。
  */
-import { Plugin, Menu, Notice } from "obsidian";
+import { Plugin, Menu } from "obsidian";
 import { createTextViaData } from "./canvas-access";
-import { setShape, setSticky, togglePlain, setEdgeStyle, setEdgeWeight, setTextScale, setTitleCard } from "./node-styles";
+import { setShape, setSticky, togglePlain, setEdgeStyle, setEdgeWeight } from "./node-styles";
 import { expandOneDegree, expandTwoDegrees } from "./graph-expand";
 import { createIframeNode } from "./iframe-node";
 import { toggleLock, toggleHide, bringToFront, sendToBack } from "./layers";
@@ -35,128 +35,32 @@ function cleanupSubmenus(): void {
   liveSubmenus.clear();
 }
 
-/**
- * 常驻「+」浮动按钮（不依赖右键事件，100% 可靠）
- *
- * 在白板视图右下角放一个插入按钮，点击弹官方 Menu。
- * 无论右键被哪个插件拦截、菜单是什么形态，这个按钮永远可用。
- */
-export function setupQuickInsertButton(plugin: Plugin): () => void {
-  const placed = new Set<HTMLElement>();
-
-  const place = () => {
-    try {
-      const leaves = plugin.app.workspace.getLeavesOfType("canvas");
-      for (const leaf of leaves) {
-        const view: any = (leaf as any).view;
-        const containerEl: HTMLElement | undefined = view?.containerEl;
-        const canvas: any = view?.canvas;
-        if (!containerEl || !canvas || placed.has(containerEl)) continue;
-
-        const btn = document.createElement("div");
-        btn.className = "cp-quick-insert-btn";
-        btn.setAttribute("aria-label", "插入节点");
-        try {
-          const { setIcon } = require("obsidian") as any;
-          setIcon(btn, "plus");
-        } catch {
-          btn.textContent = "+";
-        }
-        btn.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          const c2 = view?.canvas;
-          if (!c2) return;
-          // 以视口中心为插入位置
-          const center = c2.posCenter?.() ?? { x: 0, y: 0 };
-          showInsertMenu(c2, center, e as MouseEvent);
-          // 同时启动诊断（左键触发，不依赖右键）
-          startContextMenuDiagnose(plugin);
-        });
-        containerEl.appendChild(btn);
-        placed.add(containerEl);
-      }
-    } catch (e) {
-      console.warn("[cp-menu] 放置插入按钮失败", e);
-    }
-  };
-
-  plugin.app.workspace.onLayoutReady(place);
-  const ref = plugin.app.workspace.on("layout-change", place);
-
-  return () => {
-    plugin.app.workspace.offref(ref);
-    for (const el of placed) el.querySelector(".cp-quick-insert-btn")?.remove();
-    placed.clear();
-  };
-}
-
 export function setupContextMenu(plugin: Plugin): () => void {
   const handlers = new Map<HTMLElement, (e: MouseEvent) => void>();
-  const cleanups: Array<() => void> = [];
 
   const attach = () => {
-    const leaves = plugin.app.workspace.getLeavesOfType("canvas");
-    if (!leaves.length) return;
-    const canvas = (leaves[0] as any).view?.canvas;
-    const view = (leaves[0] as any).view;
-    const containerEl = view?.containerEl as HTMLElement | undefined;
+    // 遍历全部画布叶子：多画布并存时每个画布都可右键出增强菜单
+    for (const leaf of plugin.app.workspace.getLeavesOfType("canvas")) {
+      const canvas = (leaf as any).view?.canvas;
+      const wrapper = canvas?.wrapperEl as HTMLElement | undefined;
+      if (!wrapper || handlers.has(wrapper)) continue;
 
-    // ── 方案 A：patch canvas.menu.render（和 advanced-canvas 同源）──
-    // 每次 attach 都检查（因为 Obsidian 可能重建视图，新 canvas.menu 需要重新 patch）
-    // 用 renderPatched 防止对同一个 canvas 重复 patch
-    if (canvas && canvas.__cpRenderPatched !== true) {
-      try {
-        const menuObj = canvas?.menu;
-        const proto = menuObj?.constructor?.prototype;
-        if (proto && typeof proto.render === "function") {
-          const originalRender = proto.render;
-          proto.render = function (this: any, ...args: any[]) {
-            const result = originalRender.apply(this, args);
-            try {
-              diagnoseMenuFound = true;
-              appendToNativeMenu(this.canvas, plugin);
-            } catch (e) {
-              console.error("[cp-menu] render 后追加失败", e);
-            }
-            return result;
-          };
-          cleanups.push(() => { try { proto.render = originalRender; } catch {} });
-          canvas.__cpRenderPatched = true;
-          console.log("[cp-menu] 已 patch canvas.menu.render");
+      const onCtx = (e: MouseEvent) => {
+        const canvas2 = (leaf as any).view?.canvas;
+        if (!canvas2) return;
+        // 记录右键位置（转换成画布坐标）
+        try {
+          lastContextMenuPos = canvas2.posFromEvt?.(e) ?? canvas2.posFromClient?.({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 };
+        } catch {
+          lastContextMenuPos = canvas2.pointer ?? { x: 0, y: 0 };
         }
-      } catch (e) {
-        console.warn("[cp-menu] patch canvas.menu.render 失败", e);
-      }
+        // 等原生菜单出现后追加
+        const client = { x: e.clientX, y: e.clientY };
+        setTimeout(() => appendToNativeMenu(canvas2, plugin, client), 100);
+      };
+      wrapper.addEventListener("contextmenu", onCtx, true);
+      handlers.set(wrapper, onCtx);
     }
-
-    // ── 方案 B：document 级 mousedown（诊断 + 兜底弹菜单）──
-    if (!containerEl || handlers.has(containerEl)) return;
-
-    const onMouseDown = (e: MouseEvent) => {
-      if (e.button !== 2) return;
-      const target = e.target as HTMLElement;
-      if (target?.closest?.(".cm-content, textarea, input, .cp-title-bar, .cp-floating-toolbar, .cp-quick-insert-btn, .menu, .canvas-popup-menu")) return;
-      if (!containerEl.contains(target)) return;
-
-      const canvas2 = (leaves[0] as any).view?.canvas;
-      if (!canvas2) return;
-      diagnoseEventFired = true;
-
-      try {
-        lastContextMenuPos = canvas2.posFromEvt?.(e) ?? canvas2.posFromClient?.({ x: e.clientX, y: e.clientY }) ?? { x: 0, y: 0 };
-      } catch {
-        lastContextMenuPos = canvas2.pointer ?? { x: 0, y: 0 };
-      }
-
-      // 菜单 DOM 在 contextmenu 之后才出现：走重试追加（100~800ms）。
-      // 重试耗尽仍找不到原生菜单，才弹我们自己的完整菜单兜底——
-      // 原生菜单在场时绝不弹，避免双菜单（1.13.7 右键不走 canvas.menu.render，
-      // 方案 A 的 patch 不会触发，追加入口必须挂在这里）
-      setTimeout(() => appendToNativeMenu(canvas2, plugin), 0);
-    };
-    document.addEventListener("mousedown", onMouseDown, true);
-    handlers.set(containerEl, onMouseDown);
   };
 
   plugin.app.workspace.onLayoutReady(attach);
@@ -164,124 +68,38 @@ export function setupContextMenu(plugin: Plugin): () => void {
 
   return () => {
     plugin.app.workspace.offref(layoutRef);
-    for (const [, fn] of handlers) document.removeEventListener("mousedown", fn, true);
+    for (const [el, fn] of handlers) el.removeEventListener("contextmenu", fn, true);
     handlers.clear();
-    for (const c of cleanups) c();
+    cleanupSubmenus();
   };
 }
 
-/** 诊断状态（诊断命令开启后收集右键链路各环节数据） */
-let diagnoseActive = false;
-let diagnoseEventFired = false;
-let diagnoseMenuFound = false;
-let diagnosePopupClasses: string[] = [];
-let diagnoseMenuClasses: string[] = [];
+/** 找到原生菜单 DOM，往里追加我们的项 */
+function appendToNativeMenu(canvas: any, plugin: Plugin, client: { x: number; y: number }) {
+  // 清掉上一轮可能残留的子菜单（正常在菜单关闭时已清理，这里兜底防泄漏）
+  cleanupSubmenus();
 
-/**
- * 诊断命令：开启 15 秒诊断窗口。
- * 右键一次后报告：①监听 ②事件 ③菜单出现情况 ④菜单 class 名
- */
-export function startContextMenuDiagnose(plugin: Plugin): void {
-  diagnoseActive = false;
-  diagnoseEventFired = false;
-  diagnoseMenuFound = false;
-  diagnosePopupClasses = [];
-  diagnoseMenuClasses = [];
-
-  let attached = false;
-  let wrapperInfo = "无";
-  try {
-    const leaves = plugin.app.workspace.getLeavesOfType("canvas");
-    const canvas = (leaves[0] as any).view?.canvas;
-    const wrapper = canvas?.wrapperEl as HTMLElement | undefined;
-    attached = !!wrapper;
-    wrapperInfo = wrapper ? `${wrapper.className.slice(0, 40)}...` : "wrapperEl 不存在";
-  } catch {}
-
-  const baseMenus = document.querySelectorAll(".menu, .canvas-popup-menu").length;
-
-  diagnoseActive = true;
-  new Notice(`诊断已开启（15 秒内右键白板一次）\n监听: ${attached ? "✓" : "✗ " + wrapperInfo}`, 6000);
-
-  setTimeout(() => {
-    diagnoseActive = false;
-    const nowMenus = document.querySelectorAll(".menu, .canvas-popup-menu").length;
-    const parts = [
-      `① 监听: ${attached ? "✓" : "✗"}`,
-      `② 事件: ${diagnoseEventFired ? "✓" : "✗"}`,
-      `③ 菜单: ${diagnoseMenuFound ? "✓已增强" : nowMenus > baseMenus ? "出现但未识别" : "✗未弹出"}`,
-    ];
-    if (diagnosePopupClasses.length > 0) parts.push(`popup-menu class: ${diagnosePopupClasses.join(", ")}`);
-    if (diagnoseMenuClasses.length > 0) parts.push(`.menu class: ${diagnoseMenuClasses.join(", ")}`);
-    new Notice(`右键诊断：\n${parts.join("\n")}`, 12000);
-    console.log("[cp-menu] 诊断详情", { attached, eventFired: diagnoseEventFired, menuFound: diagnoseMenuFound, baseMenus, nowMenus, diagnosePopupClasses, diagnoseMenuClasses });
-  }, 15000);
-}
-
-/** 找到原生菜单 DOM，往里追加我们的项（带重试：菜单可能渲染慢） */
-function appendToNativeMenu(canvas: any, plugin: Plugin, attempt = 0) {
-  const DELAYS = [100, 200, 300, 500, 800];
-  try {
-    const ok = appendToNativeMenuInner(canvas, plugin);
-    if (ok) {
-      diagnoseMenuFound = true;
-      return;
-    }
-    if (attempt < DELAYS.length) {
-      // 菜单还没渲染出来，稍后重试
-      setTimeout(() => appendToNativeMenu(canvas, plugin, attempt + 1), DELAYS[attempt]);
-    } else {
-      // 重试用完（约 2 秒）还没有任何原生菜单 ——
-      // 说明这个环境的白板右键根本不弹菜单，直接弹我们的完整菜单兜底
-      console.debug("[cp-menu] 原生菜单未出现，直接弹插入菜单");
-      showInsertMenu(canvas, lastContextMenuPos);
-      if (diagnoseActive) {
-        new Notice("诊断：右键事件✓ 但原生菜单未弹出，已直接弹插入菜单", 8000);
-      }
-    }
-  } catch (e) {
-    console.error("[cp-menu] 追加菜单项失败", e);
-  }
-}
-
-function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
-  // ── 优先：白板原生 popup menu（图标按钮条）──
-  const popup = document.querySelector(".canvas-popup-menu:not(.is-cp-added)") as HTMLElement | null;
-  if (popup && document.body.contains(popup)) {
-    if (diagnoseActive) diagnosePopupClasses = Array.from(popup.classList);
-    popup.classList.add("is-cp-added");
-    addInsertButtonToPopupMenu(popup, canvas);
-    console.debug("[cp-menu] 已往 canvas-popup-menu 加插入按钮");
-    return true;
-  }
-
-  // ── fallback：标准 .menu ──
-  // 放宽：不要求 children.length>0（菜单可能还在渲染子项）
-  const menus = Array.from(document.querySelectorAll(".menu")) as HTMLElement[];
+  const menus = Array.from(document.querySelectorAll<HTMLElement>(".menu"));
   let menuEl: HTMLElement | null = null;
+  let fallback: HTMLElement | null = null;
   for (const el of menus) {
-    if (el.classList.contains("cp-submenu") || el.classList.contains("is-cp-added")) continue;
-    if (!document.body.contains(el)) continue;
-    if (diagnoseActive) diagnoseMenuClasses = Array.from(el.classList);
-    menuEl = el;
-    break;
-  }
-  if (!menuEl) {
-    // 诊断模式：列出页面上所有菜单类元素 + 白板交互层
-    if (diagnoseActive) {
-      const all = Array.from(document.querySelectorAll("[class*='menu'], [class*='popup'], [class*='context']")) as HTMLElement[];
-      const classes = all.slice(0, 10).map((el) => `${el.tagName}.${el.className.slice(0, 50)}`);
-      console.log("[cp-menu] 页面菜单类元素:", classes);
-      new Notice(`诊断：没找到 .menu/.canvas-popup-menu\n页面有 ${all.length} 个菜单类元素\n控制台看详情`, 8000);
+    if (el.classList.contains("cp-menu-submenu") || el.classList.contains("is-cp-added")) continue;
+    if (el.children.length === 0) continue;
+    if (!fallback) fallback = el;
+    // 优先选右键点附近的菜单：原生菜单以光标为锚点弹出（含边缘翻转），
+    // 避免把白板菜单项追加到其他插件/其他表面打开的菜单里
+    const r = el.getBoundingClientRect();
+    const near =
+      client.x >= r.left - 40 && client.x <= r.right + 40 &&
+      client.y >= r.top - 40 && client.y <= r.bottom + 40;
+    if (near) {
+      menuEl = el;
+      break;
     }
-    return false;
   }
+  menuEl = menuEl ?? fallback;
+  if (!menuEl) return;
   menuEl.classList.add("is-cp-added");
-  console.debug("[cp-menu] 找到标准菜单，开始追加自定义项");
-
-  if (diagnoseActive) {
-    new Notice(`诊断：找到菜单 class=${diagnoseMenuClasses.join(",")}`, 8000);
-  }
 
   // 原生菜单从 DOM 移除（关闭）时，同步清掉挂在 body 上的子菜单，
   // 否则子菜单会变成幽灵层悬在屏幕上拦截点击。
@@ -322,125 +140,6 @@ function appendToNativeMenuInner(canvas: any, plugin: Plugin): boolean {
   } else {
     appendBlankItems(menuEl, canvas, c, plugin, closeMenu);
   }
-  console.debug(`[cp-menu] 追加完成（选中节点 ${nodes.length} / 连线 ${edges.length}）`);
-  return true;
-}
-
-function attemptLabel(): string {
-  return "次尝试";
-}
-
-/**
- * 往白板 popup menu（图标按钮条）加一个"插入"按钮。
- * 点击弹出标准 Obsidian Menu（官方 API，最可靠），
- * 内含 标题/气泡/便签/纯文字/图片 等插入项，创建在右键位置。
- */
-function addInsertButtonToPopupMenu(popupEl: HTMLElement, canvas: any): void {
-  // 已加过就跳过（防御）
-  if (popupEl.querySelector(".cp-insert-btn")) return;
-
-  const btn = document.createElement("div");
-  btn.className = "clickable-icon cp-insert-btn";
-  btn.setAttribute("aria-label", "插入节点");
-  btn.style.padding = "6px";
-  // 用 Lucide plus 图标（Obsidian setIcon）
-  try {
-    const { setIcon } = require("obsidian") as any;
-    setIcon(btn, "plus");
-  } catch {
-    btn.textContent = "+";
-  }
-  btn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    showInsertMenu(canvas, lastContextMenuPos, e as MouseEvent);
-  });
-  popupEl.appendChild(btn);
-}
-
-/** 弹出插入节点菜单（Obsidian 官方 Menu，任意位置可用） */
-function showInsertMenu(canvas: any, c: { x: number; y: number }, anchorEvent?: MouseEvent): void {
-  const menu = new Menu();
-  const items: Array<{ label: string; fn: () => void }> = [
-    {
-      label: "标题文字（标题栏+正文）",
-      fn: () => {
-        const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "正文内容", width: 300, height: 120 });
-        const n = canvas.nodes.get(id);
-        if (n) { setTitleCard(n); (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" }); }
-      },
-    },
-    {
-      label: "气泡文字",
-      fn: () => {
-        const id = createTextViaData(canvas, { x: c.x - 90, y: c.y - 35, text: "", width: 180, height: 70 });
-        const n = canvas.nodes.get(id);
-        if (n) { setSticky(n, "yellow"); setShape(n, "rounded"); }
-      },
-    },
-    {
-      label: "文本节点",
-      fn: () => { createTextViaData(canvas, { x: c.x - 125, y: c.y - 50, text: "", width: 250, height: 100 }); },
-    },
-    {
-      label: "纯文字（无边框）",
-      fn: () => {
-        const id = createTextViaData(canvas, { x: c.x - 125, y: c.y - 30, text: "", width: 250, height: 60 });
-        const n = canvas.nodes.get(id);
-        if (n) togglePlain(n);
-      },
-    },
-    {
-      label: "便签（黄）",
-      fn: () => {
-        const id = createTextViaData(canvas, { x: c.x - 100, y: c.y - 100, text: "", width: 200, height: 200 });
-        const n = canvas.nodes.get(id);
-        if (n) setSticky(n, "yellow");
-      },
-    },
-    {
-      label: "代码节点",
-      fn: () => { createTextViaData(canvas, { x: c.x - 175, y: c.y - 100, text: "```js\n\n```", width: 350, height: 200 }); },
-    },
-    {
-      label: "公式节点",
-      fn: () => { createTextViaData(canvas, { x: c.x - 125, y: c.y - 60, text: "$$\nE = mc^2\n$$", width: 250, height: 120 }); },
-    },
-    {
-      label: "图片/PDF/视频...",
-      fn: async () => {
-        const m = await import("./quick-insert");
-        m.insertFileNode(canvas, (canvas as any).view?.app ?? (window as any).app);
-      },
-    },
-    {
-      label: "网页嵌入...",
-      fn: () => {
-        const url = window.prompt("输入网址（https://...）", "https://");
-        if (url) createIframeNode(canvas, url);
-      },
-    },
-  ];
-  for (const it of items) {
-    menu.addItem((mi) => mi.setTitle(it.label).onClick(() => { try { it.fn(); } catch (e) { console.error("[cp-menu] 插入失败", e); } }));
-  }
-  // 定位：优先用真实点击事件的坐标；否则用白板视图中心的屏幕坐标
-  let clientX = 0;
-  let clientY = 0;
-  if (anchorEvent && (anchorEvent.clientX || anchorEvent.clientY)) {
-    clientX = anchorEvent.clientX;
-    clientY = anchorEvent.clientY;
-  } else {
-    try {
-      const containerEl: HTMLElement | undefined = (canvas as any).view?.containerEl;
-      const r = containerEl?.getBoundingClientRect?.();
-      if (r) {
-        clientX = r.left + r.width / 2;
-        clientY = r.top + Math.min(r.height / 2, 300);
-      }
-    } catch {}
-  }
-  menu.showAtMouseEvent(new MouseEvent("click", { clientX, clientY }));
 }
 
 // ============================================================
@@ -480,8 +179,6 @@ function appendBlankItems(menuEl: HTMLElement, canvas: any, c: { x: number; y: n
   const insertItem = createItem("插入节点", "plus", () => {}, true);
   const sub = createSubmenu(insertItem, [
     { label: "文本节点", onClick: () => { createTextViaData(canvas, { x: c.x - 125, y: c.y - 50, text: "", width: 250, height: 100 }); closeMenu(); } },
-    { label: "标题文字", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 150, y: c.y - 60, text: "正文内容", width: 300, height: 120 }); const n = canvas.nodes.get(id); if (n) { setTitleCard(n); (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" }); } closeMenu(); } },
-    { label: "气泡文字", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 90, y: c.y - 35, text: "", width: 180, height: 70 }); const n = canvas.nodes.get(id); if (n) { setSticky(n, "yellow"); setShape(n, "rounded"); } closeMenu(); } },
     { label: "纯文字（无边框）", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 125, y: c.y - 30, text: "", width: 250, height: 60 }); togglePlain(canvas.nodes.get(id)); closeMenu(); } },
     { label: "便签（黄）", onClick: () => { const id = createTextViaData(canvas, { x: c.x - 100, y: c.y - 100, text: "", width: 200, height: 200 }); setSticky(canvas.nodes.get(id), "yellow"); closeMenu(); } },
     { label: "代码节点", onClick: () => { createTextViaData(canvas, { x: c.x - 175, y: c.y - 100, text: "```js\n\n```", width: 350, height: 200 }); closeMenu(); } },
@@ -505,43 +202,8 @@ function appendBlankItems(menuEl: HTMLElement, canvas: any, c: { x: number; y: n
   menuEl.appendChild(layoutItem);
 }
 
-/** 节点右键：快捷插入 + 样式 + 展开链接 + 分组 */
+/** 节点右键：样式 + 展开链接 + 分组 */
 function appendNodeItems(menuEl: HTMLElement, nodes: any[], closeMenu: () => void, canvas: any, plugin: Plugin) {
-  // 快捷插入文字（在选中节点旁边创建，方便给图片/视频配文字）
-  {
-    const refData = nodes[0]?.getData?.() ?? {};
-    const nx = refData.x ?? 0;
-    const ny = (refData.y ?? 0) + (refData.height ?? 100) + 60; // 节点下方
-    const insertItem = createItem("插入文字", "plus", () => {}, true);
-    createSubmenu(insertItem, [
-      { label: "标题文字（标题栏+正文）", onClick: () => {
-          const id = createTextViaData(canvas, { x: nx, y: ny, text: "正文内容", width: 300, height: 120 });
-          const n = canvas.nodes.get(id);
-          if (n) { setTitleCard(n); (n as any).setData?.({ ...(n as any).getData(), cpTitle: "标题" }); }
-          closeMenu();
-        } },
-      { label: "气泡文字", onClick: () => {
-          const id = createTextViaData(canvas, { x: nx, y: ny, text: "", width: 180, height: 70 });
-          const n = canvas.nodes.get(id);
-          if (n) { setSticky(n, "yellow"); setShape(n, "rounded"); }
-          closeMenu();
-        } },
-      { label: "便签（黄）", onClick: () => {
-          const id = createTextViaData(canvas, { x: nx, y: ny, text: "", width: 200, height: 200 });
-          const n = canvas.nodes.get(id);
-          if (n) setSticky(n, "yellow");
-          closeMenu();
-        } },
-      { label: "纯文字（无边框）", onClick: () => {
-          const id = createTextViaData(canvas, { x: nx, y: ny, text: "", width: 250, height: 60 });
-          const n = canvas.nodes.get(id);
-          if (n) togglePlain(n);
-          closeMenu();
-        } },
-    ]);
-    menuEl.appendChild(insertItem);
-  }
-
   // 多选时显示"打包分组"
   if (nodes.length >= 2) {
     const groupItem = createItem("打包分组", "layout", () => { groupSelection(canvas); closeMenu(); });
