@@ -15,17 +15,63 @@ export interface SlashCompletion {
   text?: string;
   /** 插入后光标相对末尾偏移 */
   cursorOffset?: number;
+  /** 特殊动作（不直接插文本）：table-grid = 弹表格格子选择器 */
+  action?: "table-grid";
+}
+
+/** 常用代码语言：[fence 标识, 显示名, 额外关键字] */
+export const CODE_LANGS: Array<{ lang: string; name: string; extra?: string[] }> = [
+  { lang: "js", name: "JavaScript" },
+  { lang: "ts", name: "TypeScript" },
+  { lang: "python", name: "Python", extra: ["py"] },
+  { lang: "c", name: "C" },
+  { lang: "cpp", name: "C++", extra: ["c++", "cc"] },
+  { lang: "csharp", name: "C#", extra: ["c#", "cs"] },
+  { lang: "java", name: "Java" },
+  { lang: "rust", name: "Rust", extra: ["rs"] },
+  { lang: "go", name: "Go", extra: ["golang"] },
+  { lang: "html", name: "HTML" },
+  { lang: "css", name: "CSS" },
+  { lang: "json", name: "JSON" },
+  { lang: "yaml", name: "YAML", extra: ["yml"] },
+  { lang: "bash", name: "Bash", extra: ["sh", "shell"] },
+  { lang: "sql", name: "SQL" },
+  { lang: "glsl", name: "GLSL" },
+  { lang: "hlsl", name: "HLSL" },
+  { lang: "lua", name: "Lua" },
+];
+
+/** 生成某语言的代码围栏补全项 */
+function codeLangItem(lang: string, name: string, extra: string[] = []): SlashCompletion {
+  return {
+    id: `code-${lang}`,
+    label: `代码块 ${name}`,
+    group: "代码块",
+    icon: "</>",
+    keywords: ["code", "代码", "代码块", lang, name.toLowerCase(), ...extra],
+    text: "```" + lang + "\n\n```\n",
+    cursorOffset: -5, // 光标落在围栏中间的空行
+  };
 }
 
 export function getSlashCompletions(query: string): SlashCompletion[] {
   const q = query.toLowerCase().trim();
   const all = ALL_COMPLETIONS;
   if (!q) return all;
-  return all.filter(
-    (c) =>
-      c.label.toLowerCase().includes(q) ||
-      c.keywords.some((k) => k.toLowerCase().includes(q))
-  );
+  // 打分过滤：精确命中关键字 > 关键字前缀 > 标题包含 > 关键字包含
+  return all
+    .map((c, i) => ({ c, i, s: score(c, q) }))
+    .filter((x) => x.s < 99)
+    .sort((a, b) => a.s - b.s || a.i - b.i)
+    .map((x) => x.c);
+}
+
+function score(c: SlashCompletion, q: string): number {
+  for (const k of c.keywords) if (k.toLowerCase() === q) return 0;
+  for (const k of c.keywords) if (k.toLowerCase().startsWith(q)) return 1;
+  if (c.label.toLowerCase().includes(q)) return 2;
+  for (const k of c.keywords) if (k.toLowerCase().includes(q)) return 3;
+  return 99;
 }
 
 const ALL_COMPLETIONS: SlashCompletion[] = [
@@ -38,7 +84,9 @@ const ALL_COMPLETIONS: SlashCompletion[] = [
   { id: "warning", label: "警告块", group: "块类型", icon: "⚠️", keywords: ["warning", "警告", "注意"], text: "> [!warning] \n> " },
   { id: "success", label: "成功块", group: "块类型", icon: "✅", keywords: ["success", "成功", "done"], text: "> [!success] \n> " },
   { id: "quote", label: "引用", group: "块类型", icon: "❝", keywords: ["quote", "引用"], text: "> " },
-  { id: "code", label: "代码块", group: "块类型", icon: "</>", keywords: ["code", "代码"], text: "```js\n\n```\n", cursorOffset: -6 },
+  { id: "code", label: "代码块", group: "块类型", icon: "</>", keywords: ["code", "代码", "代码块"], text: "```\n\n```\n", cursorOffset: -5 },
+  // 各语言代码块（紧随通用代码块之后，打 /c、/py 等直接命中）
+  ...CODE_LANGS.map((l) => codeLangItem(l.lang, l.name, l.extra)),
   { id: "math", label: "数学公式", group: "块类型", icon: "∑", keywords: ["math", "公式", "formula", "katex", "latex"], text: "$$\n\n$$\n", cursorOffset: -4 },
   {
     id: "mermaid",
@@ -55,7 +103,7 @@ const ALL_COMPLETIONS: SlashCompletion[] = [
     group: "块类型",
     icon: "▦",
     keywords: ["table", "表格", "chart"],
-    text: "\n| 列1 | 列2 | 列3 |\n| --- | --- | --- |\n| 内容 | 内容 | 内容 |\n| 内容 | 内容 | 内容 |\n",
+    action: "table-grid",
   },
   { id: "divider", label: "分隔线", group: "块类型", icon: "―", keywords: ["divider", "分隔", "hr"], text: "\n---\n" },
   // 格式

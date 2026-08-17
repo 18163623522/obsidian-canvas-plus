@@ -11,9 +11,10 @@
  * 本工具条放下方，避免遮挡原生工具条；屏幕放不下时收缩进视口。
  */
 import type { Plugin } from "obsidian";
-import { MarkdownView } from "obsidian";
+import { MarkdownView, Notice } from "obsidian";
 import { setBlockFontSize } from "../editor/block-fontsize";
 import { findEditorViewFromSelection } from "../editor/cm-access";
+import { wrapCodeFence, textToTableMarkdown } from "./table-text";
 
 export class TextFormatToolbar {
   private el: HTMLElement | null = null;
@@ -80,6 +81,8 @@ export class TextFormatToolbar {
       { label: "H", title: "高亮", action: "highlight" },
       { label: "</>", title: "行内代码", action: "code" },
       { label: "U", title: "下划线", action: "underline" },
+      { label: "{ }", title: "转为代码块", action: "codeblock" },
+      { label: "▦", title: "转为表格（支持 Tab/逗号/每行一格）", action: "table" },
     ];
     for (const b of buttons) {
       const btn = el.createEl("button", {
@@ -89,6 +92,10 @@ export class TextFormatToolbar {
       btn.textContent = b.label;
       if (b.action === "bold") btn.style.fontWeight = "700";
       if (b.action === "italic") btn.style.fontStyle = "italic";
+      // 转换类按钮：按住时不抢焦点，保住编辑器选区
+      if (b.action === "codeblock" || b.action === "table") {
+        btn.onmousedown = (e) => e.preventDefault();
+      }
       btn.onclick = () => this.applyFormat(plugin, b.action);
     }
 
@@ -331,6 +338,11 @@ export class TextFormatToolbar {
   }
 
   private applyFormat(plugin: Plugin, action: string) {
+    // 自定义转换动作（无内置命令，直接操作编辑器）
+    if (action === "codeblock" || action === "table") {
+      this.applyConversion(plugin, action);
+      return;
+    }
     // 标记对（行内代码用反引号，下划线用 HTML 标签）
     const markers: Record<string, [string, string]> = {
       bold: ["**", "**"],
@@ -369,8 +381,48 @@ export class TextFormatToolbar {
     }
   }
 
+  /** 把选中文本转为代码块 / 表格（底层仍是原生 Markdown） */
+  private applyConversion(plugin: Plugin, action: "codeblock" | "table") {
+    const build = (text: string): string | null =>
+      action === "codeblock" ? wrapCodeFence(text) : textToTableMarkdown(text);
+
+    // 1. 优先走 CM6（缓存的实例，或从当前选区找）
+    const cm = this.currentCm ?? this.getEditorView();
+    if (cm) {
+      const sel = cm.state.selection.main;
+      const text = cm.state.sliceDoc(sel.from, sel.to);
+      if (!text.trim()) return;
+      const insert = build(text);
+      if (!insert) {
+        new Notice("无法转为表格：至少需要 2 行文本");
+        return;
+      }
+      cm.dispatch({
+        changes: { from: sel.from, to: sel.to, insert },
+        selection: { anchor: sel.from + insert.length },
+      });
+      cm.focus?.();
+      this.hide();
+      return;
+    }
+
+    // 2. 兜底：笔记阅读/源码模式的 Obsidian Editor
+    const editor = plugin.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+    if (!editor) return;
+    const text = editor.getSelection();
+    if (!text.trim()) return;
+    const insert = build(text);
+    if (!insert) {
+      new Notice("无法转为表格：至少需要 2 行文本");
+      return;
+    }
+    editor.replaceSelection(insert);
+    this.hide();
+  }
+
   hide() {
     if (this.el) this.el.style.display = "none";
+    this.currentCm = null;
   }
 
   destroy() {

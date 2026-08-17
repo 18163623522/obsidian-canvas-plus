@@ -19,6 +19,8 @@ export interface CanvasPlusSettings {
   bulkLimit: number;
   /** 智能吸附辅助线开关 */
   smartSnap: boolean;
+  /** 输入自动识别（代码/公式/表格）开关 */
+  autoDetect: boolean;
   /** 节点样式模版（颜色 + 字号 + 形状等完整样式） */
   styleTemplates: StyleTemplate[];
   // —— 与其他插件的冲突避让 ——
@@ -72,6 +74,7 @@ export const DEFAULT_SETTINGS: CanvasPlusSettings = {
   bulkLinkEdges: true,
   bulkLimit: 100,
   smartSnap: false,
+  autoDetect: true,
   styleTemplates: [],
   enableNoteSlashMenu: false,
   enableCanvasSlashMenu: true,
@@ -192,6 +195,17 @@ export class CanvasPlusSettingTab extends PluginSettingTab {
         t.setValue(this.plugin.settings.smartSnap);
         t.onChange(async (v) => {
           this.plugin.settings.smartSnap = v;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    new Setting(containerEl)
+      .setName("输入自动识别")
+      .setDesc("节点里直接写内容，编辑结束时自动识别：代码 → 对应语言代码块，数学式 → 公式，Tab/逗号分隔 → 表格。识别错了把标记删掉即恢复原文（本次不再自动包）。")
+      .addToggle((t) => {
+        t.setValue(this.plugin.settings.autoDetect);
+        t.onChange(async (v) => {
+          this.plugin.settings.autoDetect = v;
           await this.plugin.saveSettings();
         });
       });
