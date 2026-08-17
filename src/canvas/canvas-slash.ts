@@ -7,6 +7,8 @@
  */
 import type { Plugin } from "obsidian";
 import { getSlashCompletions, applyCompletion } from "./slash-completions";
+import { openTableGridPicker } from "./table-grid-picker";
+import { tableMarkdown } from "./table-text";
 
 const injected = new WeakSet<any>();
 let activePopup: HTMLElement | null = null;
@@ -133,11 +135,31 @@ function selectItem(i: number) {
 function confirmItem() {
   const item = activeItems[activeIndex];
   if (!item || !activeCm) return;
-  const pos = activeCm.state.selection.main.head;
-  activeCm.dispatch({ changes: { from: activeSlashFrom, to: pos, insert: "" } });
+  const cm = activeCm;
+  const pos = cm.state.selection.main.head;
+  cm.dispatch({ changes: { from: activeSlashFrom, to: pos, insert: "" } });
   closePopup();
-  applyCompletion(item, activeCm, null as any);
-  activeCm.focus();
+
+  // 表格：弹格子选择器，选定行列后再插入
+  if (item.action === "table-grid") {
+    const coords = cm.coordsAtPos?.(activeSlashFrom);
+    const x = coords?.left ?? window.innerWidth / 2 - 90;
+    const y = (coords?.bottom ?? window.innerHeight / 2) + 4;
+    openTableGridPicker(x, y, (cols, rows) => {
+      const md = tableMarkdown(cols, rows);
+      const sel = cm.state.selection.main;
+      // 光标选中「列1」，方便直接打字替换
+      cm.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: md },
+        selection: { anchor: sel.from + 2, head: sel.from + 2 + "列1".length },
+      });
+      cm.focus();
+    });
+    return;
+  }
+
+  applyCompletion(item, cm, null as any);
+  cm.focus();
 }
 
 function closePopup() {

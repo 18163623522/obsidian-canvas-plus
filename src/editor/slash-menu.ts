@@ -17,6 +17,9 @@ import {
   TFile,
 } from "obsidian";
 import { setBlockFontSize, FONT_SIZES } from "./block-fontsize";
+import { CODE_LANGS } from "../canvas/slash-completions";
+import { openTableGridPicker } from "../canvas/table-grid-picker";
+import { tableMarkdown } from "../canvas/table-text";
 
 /** 一条菜单项 */
 export interface SlashItem {
@@ -28,7 +31,7 @@ export interface SlashItem {
   /** 图标 emoji（简单起见用 emoji，不引图标库） */
   icon: string;
   /** 分组 */
-  group: "块类型" | "字号" | "格式";
+  group: "块类型" | "字号" | "格式" | "代码块";
   /** 选中后执行的动作：要么插入文本，要么调命令 */
   insert?: {
     /** 要插入的文本（\n 表示换行）；插入位置会替换掉触发用的 `/` */
@@ -37,7 +40,7 @@ export interface SlashItem {
     cursorOffset?: number;
   };
   /** 或者执行一个命令（用于字号这类需要光标定位的） */
-  action?: "fontsize" ;
+  action?: "fontsize" | "table-grid";
   actionParam?: string;
 }
 
@@ -103,10 +106,27 @@ const MENU_ITEMS: SlashItem[] = [
   {
     id: "code",
     label: "代码块",
-    keywords: ["code", "代码", "codeblock"],
+    keywords: ["code", "代码", "codeblock", "代码块"],
     icon: "</>",
     group: "块类型",
-    insert: { text: "```js\n\n```\n", cursorOffset: -5 },
+    insert: { text: "```\n\n```\n", cursorOffset: -5 },
+  },
+  // 各语言代码块（打 /c、/py 等直接命中）
+  ...CODE_LANGS.map((l) => ({
+    id: `code-${l.lang}`,
+    label: `代码块 ${l.name}`,
+    keywords: ["code", "代码", "代码块", l.lang, l.name.toLowerCase(), ...(l.extra ?? [])],
+    icon: "</>",
+    group: "代码块" as const,
+    insert: { text: "```" + l.lang + "\n\n```\n", cursorOffset: -5 },
+  })),
+  {
+    id: "table",
+    label: "表格",
+    keywords: ["table", "表格", "chart"],
+    icon: "▦",
+    group: "块类型",
+    action: "table-grid",
   },
   {
     id: "todo",
@@ -190,21 +210,30 @@ export class SlashMenuSuggest extends EditorSuggest<SlashItem> {
 
   getSuggestions(context: EditorSuggestContext): SlashItem[] {
     const q = context.query.toLowerCase().trim();
+    const groupOrder: Record<string, number> = { 块类型: 0, 代码块: 1, 格式: 2, 字号: 3 };
     let items = MENU_ITEMS;
-    if (q) {
-      items = items.filter((item) => {
-        if (item.label.toLowerCase().includes(q)) return true;
-        return item.keywords.some((k) => k.toLowerCase().includes(q));
+    if (!q) {
+      // 无过滤词：按分组聚类展示
+      return items.sort((a, b) => {
+        const ga = groupOrder[a.group] ?? 99;
+        const gb = groupOrder[b.group] ?? 99;
+        if (ga !== gb) return ga - gb;
+        return a.label.localeCompare(b.label, "zh");
       });
     }
-    // 按分组排序，让同类挨在一起
-    const groupOrder: Record<string, number> = { 块类型: 0, 格式: 1, 字号: 2 };
-    return items.sort((a, b) => {
-      const ga = groupOrder[a.group] ?? 99;
-      const gb = groupOrder[b.group] ?? 99;
-      if (ga !== gb) return ga - gb;
-      return a.label.localeCompare(b.label, "zh");
-    });
+    // 有过滤词：精确命中关键字排最前（如 /c 直接命中「代码块 C」）
+    const score = (item: SlashItem): number => {
+      for (const k of item.keywords) if (k.toLowerCase() === q) return 0;
+      for (const k of item.keywords) if (k.toLowerCase().startsWith(q)) return 1;
+      if (item.label.toLowerCase().includes(q)) return 2;
+      for (const k of item.keywords) if (k.toLowerCase().includes(q)) return 3;
+      return 99;
+    };
+    return items
+      .map((item, i) => ({ item, i, s: score(item) }))
+      .filter((x) => x.s < 99)
+      .sort((a, b) => a.s - b.s || (groupOrder[a.item.group] ?? 99) - (groupOrder[b.item.group] ?? 99) || a.i - b.i)
+      .map((x) => x.item);
   }
 
   renderSuggestion(item: SlashItem, el: HTMLElement): void {
@@ -231,6 +260,22 @@ export class SlashMenuSuggest extends EditorSuggest<SlashItem> {
         const newCursor = editor.offsetToPos(before + item.insert.text.length + item.insert.cursorOffset);
         editor.setCursor(newCursor);
       }
+    } else if (item.action === "table-grid") {
+      // 弹格子选择器，选定行列后插入表格
+      const cm = (editor as any).cm;
+      const coords = cm?.coordsAtPos?.(editor.posToOffset(editor.getCursor()));
+      const x = coords?.left ?? window.innerWidth / 2 - 90;
+      const y = (coords?.bottom ?? window.innerHeight / 2) + 4;
+      openTableGridPicker(x, y, (cols, rows) => {
+        const md = tableMarkdown(cols, rows);
+        const from = editor.getCursor();
+        editor.replaceSelection(md);
+        // 光标选中「列1」，方便直接打字替换
+        const cellStart = editor.offsetToPos(editor.posToOffset(from) + 2);
+        const cellEnd = editor.offsetToPos(editor.posToOffset(from) + 2 + "列1".length);
+        editor.setSelection(cellStart, cellEnd);
+        editor.focus?.();
+      });
     } else if (item.action === "fontsize" && item.actionParam) {
       setBlockFontSize(editor, parseInt(item.actionParam, 10));
     }

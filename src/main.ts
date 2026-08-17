@@ -61,6 +61,8 @@ import { setupTabConnect } from "./canvas/tab-connect";
 import { searchInNode } from "./canvas/node-search";
 import { setupAltDuplicate } from "./canvas/alt-duplicate";
 import { setupCommentNodes, createCommentNode } from "./canvas/comment-node";
+import { setupNodeWidgets } from "./canvas/node-widget";
+import { setupAutoDetect, detectNodeNow, diagnoseAutoDetect } from "./canvas/auto-detect";
 import { saveCurrentView, gotoView, deleteView } from "./canvas/view-bookmark";
 import { exportImage } from "./canvas/export-image";
 import { setupGuides, placeHorizontalGuide, placeVerticalGuide, clearGuides } from "./canvas/persistent-guides";
@@ -87,6 +89,8 @@ export default class CanvasPlusPlugin extends Plugin {
   private uninstallTab?: () => void;
   private uninstallAltDup?: () => void;
   private uninstallComments?: () => void;
+  private uninstallNodeWidgets?: () => void;
+  private uninstallAutoDetect?: () => void;
   private uninstallGuides?: () => void;
   private textFormatToolbar!: TextFormatToolbar;
 
@@ -173,6 +177,10 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallAltDup = setupAltDuplicate(this);
     // 14. 评论节点渲染
     this.uninstallComments = setupCommentNodes(this);
+    // 16. 节点角标（代码语言下拉 / 表格网格编辑入口）
+    this.uninstallNodeWidgets = setupNodeWidgets(this);
+    // 17. 输入自动识别（裸内容 → 代码块/公式/表格）
+    this.uninstallAutoDetect = setupAutoDetect(this);
     // 15. 持久参考线
     this.uninstallGuides = setupGuides(this);
 
@@ -356,6 +364,38 @@ export default class CanvasPlusPlugin extends Plugin {
         if (checking) return true;
         diagnoseTimers(canvas);
         new Notice("已扫描，请看 Console (Ctrl+Shift+I) 里 [cp-timer] 日志");
+      },
+    });
+
+    // —— 自动识别：手动触发 + 诊断 ——
+    this.addCommand({
+      id: "detect-node-now",
+      name: "识别选中节点内容（代码/公式/表格）",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        const sel = Array.from(canvas.selection.values()).filter(
+          (n: any) => n?.getData?.()?.type === "text"
+        );
+        if (sel.length === 0) {
+          new Notice("请先选中一个文本节点");
+          return;
+        }
+        for (const n of sel.slice(0, 5)) {
+          new Notice(detectNodeNow(this, n as any));
+        }
+      },
+    });
+    this.addCommand({
+      id: "diagnose-auto-detect",
+      name: "（诊断）自动识别链路",
+      checkCallback: (checking) => {
+        const canvas = getActiveCanvas(this.app);
+        if (!canvas) return false;
+        if (checking) return true;
+        const report = diagnoseAutoDetect(this);
+        new Notice(report, 10000);
       },
     });
 
@@ -681,6 +721,8 @@ export default class CanvasPlusPlugin extends Plugin {
     this.uninstallTab?.();
     this.uninstallAltDup?.();
     this.uninstallComments?.();
+    this.uninstallNodeWidgets?.();
+    this.uninstallAutoDetect?.();
     this.uninstallGuides?.();
     this.toolbar?.destroy();
   }
