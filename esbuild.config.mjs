@@ -12,7 +12,33 @@ const builtins = [
   "tty", "url", "util", "v8", "vm", "wasi", "worker_threads", "zlib",
 ];
 
-const pluginDir = "D:/Note/Obsidian/.obsidian/plugins/canvas-plus";
+// 构建产物同步到所有使用中的 vault（第一个为主输出，其余复制）。
+// 含两台开发机器的路径；本机不存在的路径会被自动创建为空目录（无害）。
+const pluginDirs = [
+  "D:/001_Archive/文档/Note/Note/.obsidian/plugins/canvas-plus",
+  "D:/001_Archive/文档/Note/Obsidian/笔记整理/.obsidian/plugins/canvas-plus",
+  "D:/Note/Obsidian/.obsidian/plugins/canvas-plus",
+];
+
+// 每次构建结束（含 watch 热构建）把 main.js / manifest.json / styles.css 同步到全部 vault
+const copyToVaultsPlugin = {
+  name: "copy-to-vaults",
+  setup(build) {
+    build.onEnd(async () => {
+      const { promises: fs } = await import("node:fs");
+      const path = await import("node:path");
+      for (const dir of pluginDirs) {
+        await fs.mkdir(dir, { recursive: true });
+        // 主输出目录的 main.js 由 esbuild 自己写，其余目录复制过去
+        if (dir !== pluginDirs[0]) {
+          await fs.copyFile(`${pluginDirs[0]}/main.js`, path.join(dir, "main.js")).catch(() => {});
+        }
+        await fs.copyFile("manifest.json", path.join(dir, "manifest.json")).catch(() => {});
+        await fs.copyFile("styles.css", path.join(dir, "styles.css")).catch(() => {});
+      }
+    });
+  },
+};
 
 const context = {
   entryPoints: ["src/main.ts"],
@@ -38,25 +64,14 @@ const context = {
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,
-  outfile: `${pluginDir}/main.js`,
+  outfile: `${pluginDirs[0]}/main.js`,
+  plugins: [copyToVaultsPlugin],
 };
-
-// 复制 manifest.json / styles.css 到目标 vault（开发便利）
-async function copyStatic() {
-  const { promises: fs } = await import("node:fs");
-  const path = await import("node:path");
-  await fs.mkdir(pluginDir, { recursive: true });
-  await fs.copyFile("manifest.json", path.join(pluginDir, "manifest.json")).catch(() => {});
-  await fs.copyFile("styles.css", path.join(pluginDir, "styles.css")).catch(() => {});
-}
-
-await copyStatic();
 
 if (prod) {
   await esbuild.build(context);
 } else {
   const ctx = await esbuild.context(context);
   await ctx.watch();
-  console.log(`[canvas-plus] watching → ${pluginDir}/main.js`);
-  // 复制 manifest/styles 一次即可；后续热构建只重写 main.js
+  console.log(`[canvas-plus] watching → ${pluginDirs.join(", ")}`);
 }
