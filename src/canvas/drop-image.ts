@@ -91,16 +91,14 @@ async function importAndCreate(app: App, canvas: Canvas, file: File, pos: { x: n
   try {
     // 读文件为 ArrayBuffer
     const buf = await file.arrayBuffer();
-    // 附件目录：用 Obsidian 配置，兜底 attachments/
-    const attachFolder = (app.vault as any).config?.attachmentFolderPath ?? "attachments";
-    const folder = attachFolder === "/" || attachFolder === "" ? "" : attachFolder + "/";
     const fileName = file.name || `pasted-${Date.now()}.png`;
-    const fullPath = normalizePath(folder + fileName);
+    const fullPath = await resolveAttachmentPath(app, canvas, fileName);
 
     // 确保目录存在
+    const folder = fullPath.replace(/\/[^/]*$/, "");
     if (folder) {
       try {
-        await app.vault.createFolder(folder.replace(/\/$/, ""));
+        await app.vault.createFolder(folder);
       } catch {
         // 已存在，忽略
       }
@@ -116,11 +114,12 @@ async function importAndCreate(app: App, canvas: Canvas, file: File, pos: { x: n
     }
 
     const created = await app.vault.createBinary(finalPath, new Uint8Array(buf) as any);
-    // 创建文件节点（数据快照模式）
+    // createBinary 返回 TFile；createFileNode 只认 TFile，传字符串会毒化节点
+    // （filePath=undefined + 每次渲染 getShortName 崩溃），所以直接把 TFile 传下去
     createFileViaData(canvas, {
       x: pos.x,
       y: pos.y,
-      file: finalPath,
+      file: created,
       width: 300,
       height: 220,
     });
@@ -129,4 +128,29 @@ async function importAndCreate(app: App, canvas: Canvas, file: File, pos: { x: n
     console.error("[canvas-plus] importAndCreate failed", e);
     new Notice(`添加失败：${(e as Error).message}`);
   }
+}
+
+/**
+ * 解析附件存放路径。
+ * 优先用官方 vault.getAvailablePathForAttachments：完整尊重"附件默认存放位置"
+ * 的四种模式（含 "./"=当前文件所在目录，即白板文件旁边），并自动处理同名。
+ * 老版本没有该 API 时，手工兜底（"./" 会被归一化到仓库根目录）。
+ */
+async function resolveAttachmentPath(app: App, canvas: Canvas, fileName: string): Promise<string> {
+  const vault = app.vault as any;
+  if (typeof vault.getAvailablePathForAttachments === "function") {
+    try {
+      const dot = fileName.lastIndexOf(".");
+      const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+      const ext = dot > 0 ? fileName.slice(dot + 1) : "png";
+      const activeFile = (canvas as any).view?.file ?? app.workspace.getActiveFile();
+      const path = await vault.getAvailablePathForAttachments(base, ext, activeFile);
+      if (typeof path === "string" && path) return normalizePath(path);
+    } catch {
+      // 走下面的手工兜底
+    }
+  }
+  const attachFolder = vault.config?.attachmentFolderPath ?? "attachments";
+  const folder = attachFolder === "/" || attachFolder === "" ? "" : attachFolder + "/";
+  return normalizePath(folder + fileName);
 }

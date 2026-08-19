@@ -125,9 +125,15 @@ export function diagnoseCanvas(app: App): void {
   }
 }
 
+/** 从 canvas 实例反查 App（节点视图持有 canvas.view.app） */
+function appOfCanvas(canvas: Canvas): App {
+  const c = canvas as any;
+  return c.view?.app ?? c.app;
+}
+
 export interface NewNodeInput {
   text?: string;
-  file?: string; // 文件节点：vault 内相对路径
+  file?: string | TFile; // 文件节点：vault 内相对路径，或直接给 TFile（原生 createFileNode 只认 TFile）
   url?: string; // 链接节点
   x?: number;
   y?: number;
@@ -220,7 +226,7 @@ export function bboxOf(nodes: { x: number; y: number; width: number; height: num
  */
 export function addNodeData(
   canvas: Canvas,
-  nodeData: Partial<CanvasNodeData> & { type: string }
+  nodeData: Partial<CanvasNodeData> & { type: string } & { file?: string | TFile }
 ): string {
   const c = canvas as any;
   const pos = { x: nodeData.x ?? 0, y: nodeData.y ?? 0 };
@@ -233,7 +239,15 @@ export function addNodeData(
     if (nodeData.type === "text" && typeof c.createTextNode === "function") {
       node = c.createTextNode({ pos, size, text: nodeData.text ?? "", color: nodeData.color });
     } else if (nodeData.type === "file" && typeof c.createFileNode === "function") {
-      node = c.createFileNode({ pos, size, file: (nodeData as any).file, color: nodeData.color });
+      // createFileNode 的 file 参数必须是 TFile：路径字符串会被 setFile 原样塞进
+      // node.file（filePath=undefined），之后每次渲染都在 getShortName() 崩溃，
+      // 节点既显示不出也存不下来（2026-08-18 视频拖入实测）
+      const f = (nodeData as any).file;
+      const tf =
+        typeof f === "string"
+          ? appOfCanvas(canvas).vault.getAbstractFileByPath(f)
+          : f;
+      if (tf) node = c.createFileNode({ pos, size, file: tf, color: nodeData.color });
     } else if (nodeData.type === "link" && typeof c.createLinkNode === "function") {
       node = c.createLinkNode({ pos, size, url: (nodeData as any).url, color: nodeData.color });
     } else if (nodeData.type === "group" && typeof c.createGroupNode === "function") {
@@ -269,7 +283,9 @@ export function addNodeData(
   // 可选字段只在有值时加
   if (nodeData.color !== undefined) full.color = nodeData.color;
   if (nodeData.text !== undefined) full.text = nodeData.text;
-  if ((nodeData as any).file !== undefined) full.file = (nodeData as any).file;
+  if ((nodeData as any).file !== undefined)
+    full.file =
+      typeof (nodeData as any).file === "string" ? (nodeData as any).file : (nodeData as any).file.path;
   if ((nodeData as any).url !== undefined) full.url = (nodeData as any).url;
   if ((nodeData as any).label !== undefined) full.label = (nodeData as any).label;
 
@@ -296,10 +312,10 @@ export function createTextViaData(
   });
 }
 
-/** 创建文件节点的便捷封装 */
+/** 创建文件节点的便捷封装（file 可传路径字符串或 TFile） */
 export function createFileViaData(
   canvas: Canvas,
-  opts: { x: number; y: number; file: string; width?: number; height?: number }
+  opts: { x: number; y: number; file: string | TFile; width?: number; height?: number }
 ): string {
   return addNodeData(canvas, {
     type: "file",
